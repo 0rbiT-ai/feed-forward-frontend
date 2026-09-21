@@ -1,24 +1,33 @@
 {
   "expo": {
-    "name": "frontend",
-    "slug": "frontend",
+    "name": "FeedForward",
+    "slug": "feedforward",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "scheme": "feedforward",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.feedforward.app"
     },
     "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      "package": "com.feedforward.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "FeedForward needs your location to show nearby surplus food listings and calculate pickup distances.",
+          "locationWhenInUsePermission": "FeedForward needs your location to show nearby surplus food listings and calculate pickup distances."
+        }
+      ],
+      "expo-router",
+      "expo-secure-store",
+      "expo-status-bar",
+      "expo-font"
+    ]
   }
 }
