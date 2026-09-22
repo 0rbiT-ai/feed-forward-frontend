@@ -105,150 +105,164 @@ export default function CreateListingModal({ visible, onClose, onSuccess }) {
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.modalOverlay}
-      >
-        <View style={styles.modalContainer}>
-          {/* Header */}
-          <View style={styles.header}>
-            <View>
-              <Text style={styles.headerTitle}>Post Surplus Surplus</Text>
-              <Text style={styles.headerSub}>Broadcast instantly to local verified NGOs</Text>
-            </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-              <MaterialCommunityIcons name="close" size={22} color="#6b7280" />
-            </TouchableOpacity>
-          </View>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
+        >
+          <TouchableWithoutFeedback accessible={false}>
+            <View style={styles.modalContainer}>
+              {/* Header */}
+              <View style={styles.header}>
+                <View>
+                  <Text style={styles.headerTitle}>Post Surplus Food</Text>
+                  <Text style={styles.headerSub}>Broadcast instantly to local verified NGOs</Text>
+                </View>
+                <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+                  <MaterialCommunityIcons name="close" size={22} color="#6b7280" />
+                </TouchableOpacity>
+              </View>
 
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.formScroll}>
-            {/* Category Selector */}
-            <Text style={styles.fieldLabel}>Category / Item Type</Text>
-            <View style={styles.catRow}>
-              {CATEGORIES.map((cat) => {
-                const isSelected = selectedCat.id === cat.id;
-                return (
-                  <TouchableOpacity
-                    key={cat.id}
-                    style={[styles.catCard, isSelected && styles.selectedCatCard]}
-                    activeOpacity={0.8}
-                    onPress={() => handleSelectCategory(cat)}
-                  >
-                    <MaterialCommunityIcons
-                      name={cat.icon}
-                      size={20}
-                      color={isSelected ? '#ea580c' : '#6b7280'}
-                    />
-                    <Text style={[styles.catText, isSelected && styles.selectedCatText]}>
-                      {cat.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.formScroll}
+                keyboardShouldPersistTaps="handled"
+              >
+                {/* Category Selector */}
+                <Text style={styles.fieldLabel}>Category / Item Type</Text>
+                <View style={styles.catRow}>
+                  {CATEGORIES.map((cat) => {
+                    const isSelected = selectedCat.id === cat.id;
+                    return (
+                      <TouchableOpacity
+                        key={cat.id}
+                        style={[styles.catCard, isSelected && styles.selectedCatCard]}
+                        activeOpacity={0.8}
+                        onPress={() => handleSelectCategory(cat)}
+                      >
+                        <MaterialCommunityIcons
+                          name={cat.icon}
+                          size={20}
+                          color={isSelected ? '#ea580c' : '#6b7280'}
+                        />
+                        <Text style={[styles.catText, isSelected && styles.selectedCatText]}>
+                          {cat.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
 
-            {/* Food Name */}
-            <Text style={styles.fieldLabel}>Item / Dish Name</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. Vegetable Pulav, Rice Bags, Fresh Sourdough..."
-              placeholderTextColor="#9ca3af"
-              value={foodName}
-              onChangeText={setFoodName}
-            />
-
-            {/* Quantity and Unit */}
-            <View style={styles.row}>
-              <View style={{ flex: 1, marginRight: 10 }}>
-                <Text style={styles.fieldLabel}>Quantity</Text>
+                {/* Food Name */}
+                <Text style={styles.fieldLabel}>Item / Dish Name</Text>
                 <TextInput
                   style={styles.input}
-                  placeholder="30"
-                  keyboardType="numeric"
-                  value={quantity}
-                  onChangeText={setQuantity}
+                  placeholder="e.g. Vegetable Pulav, Rice Bags, Fresh Sourdough..."
+                  placeholderTextColor="#9ca3af"
+                  value={foodName}
+                  onChangeText={setFoodName}
+                  returnKeyType="done"
+                  onSubmitEditing={Keyboard.dismiss}
                 />
-              </View>
 
-              <View style={{ flex: 1 }}>
-                <Text style={styles.fieldLabel}>Unit</Text>
-                <View style={styles.unitSelector}>
-                  {['servings', 'kg', 'crates'].map((u) => (
+                {/* Quantity and Unit */}
+                <View style={styles.row}>
+                  <View style={{ flex: 1, marginRight: 10 }}>
+                    <Text style={styles.fieldLabel}>Quantity</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="30"
+                      keyboardType="numeric"
+                      value={quantity}
+                      onChangeText={setQuantity}
+                      returnKeyType="done"
+                      onSubmitEditing={Keyboard.dismiss}
+                    />
+                  </View>
+
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.fieldLabel}>Unit</Text>
+                    <View style={styles.unitSelector}>
+                      {['servings', 'kg', 'crates'].map((u) => (
+                        <TouchableOpacity
+                          key={u}
+                          style={[styles.unitChip, unit === u && styles.activeUnitChip]}
+                          onPress={() => setUnit(u)}
+                        >
+                          <Text style={[styles.unitText, unit === u && styles.activeUnitText]}>{u}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                </View>
+
+                {/* Safe Until Window */}
+                <Text style={styles.fieldLabel}>Safe Until / Shelf Life</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.windowRow}>
+                  {SAFE_WINDOWS.map((sw) => (
                     <TouchableOpacity
-                      key={u}
-                      style={[styles.unitChip, unit === u && styles.activeUnitChip]}
-                      onPress={() => setUnit(u)}
+                      key={sw.hours}
+                      style={[styles.windowChip, safeHours === sw.hours && styles.activeWindowChip]}
+                      onPress={() => setSafeHours(sw.hours)}
                     >
-                      <Text style={[styles.unitText, unit === u && styles.activeUnitText]}>{u}</Text>
+                      <Text style={[styles.windowText, safeHours === sw.hours && styles.activeWindowText]}>
+                        {sw.label}
+                      </Text>
                     </TouchableOpacity>
                   ))}
-                </View>
-              </View>
-            </View>
+                </ScrollView>
 
-            {/* Safe Until Window */}
-            <Text style={styles.fieldLabel}>Safe Until / Shelf Life</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.windowRow}>
-              {SAFE_WINDOWS.map((sw) => (
+                {/* Veg Toggle */}
+                <View style={styles.vegRow}>
+                  <View>
+                    <Text style={styles.fieldLabel}>Pure Vegetarian?</Text>
+                    <Text style={styles.subHint}>{isVeg ? 'Vegetarian compliant' : 'Contains non-veg items'}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.vegToggleBtn, isVeg ? styles.vegBtnActive : styles.nonVegBtn]}
+                    onPress={() => setIsVeg(!isVeg)}
+                  >
+                    <Text style={[styles.vegBtnText, isVeg ? { color: '#059669' } : { color: '#dc2626' }]}>
+                      {isVeg ? 'VEG' : 'NON-VEG'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Handling Notes */}
+                <Text style={styles.fieldLabel}>Handling & Storage Instructions</Text>
+                <TextInput
+                  style={[styles.input, { height: 60 }]}
+                  placeholder="e.g. Bring thermal crates, ambient temperature..."
+                  placeholderTextColor="#9ca3af"
+                  multiline
+                  value={storageNotes}
+                  onChangeText={setStorageNotes}
+                  returnKeyType="done"
+                  onSubmitEditing={Keyboard.dismiss}
+                />
+
+                {/* Submit Button */}
                 <TouchableOpacity
-                  key={sw.hours}
-                  style={[styles.windowChip, safeHours === sw.hours && styles.activeWindowChip]}
-                  onPress={() => setSafeHours(sw.hours)}
+                  style={styles.submitButton}
+                  activeOpacity={0.8}
+                  onPress={handleSubmit}
+                  disabled={loading}
                 >
-                  <Text style={[styles.windowText, safeHours === sw.hours && styles.activeWindowText]}>
-                    {sw.label}
-                  </Text>
+                  {loading ? (
+                    <ActivityIndicator color="#ffffff" />
+                  ) : (
+                    <View style={styles.submitRow}>
+                      <MaterialCommunityIcons name="broadcast" size={20} color="#ffffff" />
+                      <Text style={styles.submitText}>Broadcast to Live Feed</Text>
+                    </View>
+                  )}
                 </TouchableOpacity>
-              ))}
-            </ScrollView>
-
-            {/* Veg Toggle */}
-            <View style={styles.vegRow}>
-              <View>
-                <Text style={styles.fieldLabel}>Pure Vegetarian?</Text>
-                <Text style={styles.subHint}>{isVeg ? 'Vegetarian compliant' : 'Contains non-veg items'}</Text>
-              </View>
-              <TouchableOpacity
-                style={[styles.vegToggleBtn, isVeg ? styles.vegBtnActive : styles.nonVegBtn]}
-                onPress={() => setIsVeg(!isVeg)}
-              >
-                <Text style={[styles.vegBtnText, isVeg ? { color: '#059669' } : { color: '#dc2626' }]}>
-                  {isVeg ? 'VEG' : 'NON-VEG'}
-                </Text>
-              </TouchableOpacity>
+              </ScrollView>
             </View>
-
-            {/* Handling Notes */}
-            <Text style={styles.fieldLabel}>Handling & Storage Instructions</Text>
-            <TextInput
-              style={[styles.input, { height: 60 }]}
-              placeholder="e.g. Bring thermal crates, ambient temperature..."
-              placeholderTextColor="#9ca3af"
-              multiline
-              value={storageNotes}
-              onChangeText={setStorageNotes}
-            />
-
-            {/* Submit Button */}
-            <TouchableOpacity
-              style={styles.submitButton}
-              activeOpacity={0.8}
-              onPress={handleSubmit}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="#ffffff" />
-              ) : (
-                <View style={styles.submitRow}>
-                  <MaterialCommunityIcons name="broadcast" size={20} color="#ffffff" />
-                  <Text style={styles.submitText}>Broadcast to Live Feed</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
-      </KeyboardAvoidingView>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
+      </TouchableWithoutFeedback>
     </Modal>
   );
 }
