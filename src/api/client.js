@@ -263,12 +263,15 @@ export const api = {
       const res = await apiClient.get('/api/listings', { params });
       return res.data;
     } catch (err) {
+      if (err.response?.data?.message) {
+        throw new Error(err.response.data.message);
+      }
       console.warn('API listings call fallback:', err.message);
-      return fallbackListings;
+      return [];
     }
   },
 
-  // Reserve a listing
+  // Reserve a listing (NGO only)
   async reserveListing(listingId, portions = 10, shelterDelivered = "Local Community Shelter") {
     try {
       const res = await apiClient.post(`/api/listings/${listingId}/reserve`, {
@@ -277,76 +280,53 @@ export const api = {
       });
       return res.data;
     } catch (err) {
-      if (err.response?.data) throw err.response.data;
-      // Fallback local state reservation
-      const listing = fallbackListings.find(l => l.id === listingId);
-      const portionsToReserve = Math.min(portions, listing ? listing.availableServings : portions);
-      if (listing) {
-        listing.availableServings -= portionsToReserve;
-      }
-      const code = `RES-${Math.floor(1000 + Math.random() * 9000)}`;
-      const newReservation = {
-        id: code,
-        restaurant: listing ? listing.restaurant : "Partner Restaurant",
-        foodName: listing ? listing.foodName : "Surplus Meals",
-        reservedServings: portionsToReserve,
-        totalBatchServings: listing ? listing.totalServings : portionsToReserve,
-        safeUntil: "11:00 PM",
-        pickupDeadline: "10:00 PM",
-        pickupCode: code.replace('RES-', ''),
-        status: "ready_for_pickup",
-        restaurantPhone: listing ? listing.contactPhone : "+91 80 4000 0000",
-        address: listing ? listing.address : "Koramangala, Bengaluru",
-        pickupInstructions: "Enter through rear service corridor. Bring thermal bags.",
-        reservedAt: "Just now",
-        isVeg: listing ? listing.isVeg : true,
-      };
-      fallbackReservations.unshift(newReservation);
-      return { message: "Listing reserved successfully!", reservation: newReservation };
+      const msg = err.response?.data?.message || err.message || "Could not reserve listing";
+      throw new Error(msg);
     }
   },
 
-  // Reservations
+  // Cancel reservation with reason (NGO only)
+  async cancelReservation(reservationId, reason, notes) {
+    try {
+      const res = await apiClient.post(`/api/reservations/${reservationId}/cancel`, {
+        reason,
+        notes
+      });
+      return res.data;
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || "Failed to cancel reservation";
+      throw new Error(msg);
+    }
+  },
+
+  // Reservations (NGO active pickups)
   async getReservations() {
     try {
       const res = await apiClient.get('/api/reservations');
       return res.data;
     } catch (err) {
-      return fallbackReservations;
+      return [];
     }
   },
 
+  // Legacy complete reservation endpoint
   async completeReservation(reservationId, shelterDelivered = "Asha Kiran Night Shelter") {
     try {
       const res = await apiClient.patch(`/api/reservations/${reservationId}/complete`, { shelterDelivered });
       return res.data;
     } catch (err) {
-      const found = fallbackReservations.find(r => r.id === reservationId);
-      if (found) {
-        fallbackReservations = fallbackReservations.filter(r => r.id !== reservationId);
-        fallbackHistory.unshift({
-          id: found.id.replace('RES-', 'HIS-'),
-          restaurant: found.restaurant,
-          foodName: found.foodName,
-          servingsRescued: found.reservedServings,
-          completedAt: "Just now",
-          shelterDelivered,
-          fssaiVerified: true,
-        });
-        fallbackProfile.impactStats.totalMealsRescued += found.reservedServings;
-        fallbackProfile.impactStats.foodWastePreventedKg += (found.reservedServings * 0.5);
-      }
-      return { message: "Pickup completed successfully!" };
+      const msg = err.response?.data?.message || err.message || "Failed to complete pickup";
+      throw new Error(msg);
     }
   },
 
-  // History
+  // History (NGO past pickups & cancellations)
   async getHistory() {
     try {
       const res = await apiClient.get('/api/history');
       return res.data;
     } catch (err) {
-      return fallbackHistory;
+      return [];
     }
   },
 
@@ -356,7 +336,8 @@ export const api = {
       const res = await apiClient.get('/api/profile');
       return res.data;
     } catch (err) {
-      return fallbackProfile;
+      if (err.response?.data?.message) throw new Error(err.response.data.message);
+      return null;
     }
   },
 
@@ -365,16 +346,88 @@ export const api = {
       const res = await apiClient.put('/api/profile', data);
       return res.data;
     } catch (err) {
-      fallbackProfile = {
-        ...fallbackProfile,
-        ...data,
-        logisticsSetting: {
-          ...fallbackProfile.logisticsSetting,
-          operatingBase: data.operatingBase || fallbackProfile.logisticsSetting.operatingBase,
-          defaultRadiusKm: data.defaultRadiusKm || fallbackProfile.logisticsSetting.defaultRadiusKm,
-        }
-      };
-      return { message: "Profile updated successfully!", profile: fallbackProfile };
+      const msg = err.response?.data?.message || err.message || "Failed to update profile";
+      throw new Error(msg);
+    }
+  },
+
+  // ------------------------------------------
+  // RESTAURANT SUITE METHODS
+  // ------------------------------------------
+
+  // Verify Handover OTP entered by Restaurant
+  async verifyHandoverOtp(reservationCode, pickupCode) {
+    try {
+      const res = await apiClient.post('/api/restaurant/reservations/verify-otp', {
+        reservationCode,
+        pickupCode
+      });
+      return res.data;
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || "Failed to verify handover OTP";
+      throw new Error(msg);
+    }
+  },
+
+  // Get Restaurant listings
+  async getRestaurantListings() {
+    try {
+      const res = await apiClient.get('/api/restaurant/listings');
+      return res.data;
+    } catch (err) {
+      return [];
+    }
+  },
+
+  // Create new listing (Restaurant)
+  async createRestaurantListing(data) {
+    try {
+      const res = await apiClient.post('/api/listings', data);
+      return res.data;
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || "Failed to create listing";
+      throw new Error(msg);
+    }
+  },
+
+  // Update listing (Restaurant)
+  async updateRestaurantListing(listingId, data) {
+    try {
+      const res = await apiClient.patch(`/api/restaurant/listings/${listingId}`, data);
+      return res.data;
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || "Failed to update listing";
+      throw new Error(msg);
+    }
+  },
+
+  // Get incoming reservations waiting for pickup (Restaurant)
+  async getRestaurantReservations() {
+    try {
+      const res = await apiClient.get('/api/restaurant/reservations');
+      return res.data;
+    } catch (err) {
+      return [];
+    }
+  },
+
+  // Get Restaurant donation history
+  async getRestaurantHistory() {
+    try {
+      const res = await apiClient.get('/api/restaurant/history');
+      return res.data;
+    } catch (err) {
+      return [];
+    }
+  },
+
+  // Get Restaurant stats
+  async getRestaurantStats() {
+    try {
+      const res = await apiClient.get('/api/restaurant/stats');
+      return res.data;
+    } catch (err) {
+      return null;
     }
   },
 };

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,20 +7,24 @@ import {
   ActivityIndicator,
   StyleSheet,
   RefreshControl,
-  Alert,
+  SafeAreaView,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { api } from '../../../src/api/client';
+import NgoOtpModal from '../../../src/components/NgoOtpModal';
+import CancelReservationModal from '../../../src/components/CancelReservationModal';
 
-export default function ReservationsScreen({ navigation }) {
+export default function ReservationsScreen() {
+  const router = useRouter();
   const [reservations, setReservations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [completingId, setCompletingId] = useState(null);
+  const [selectedOtp, setSelectedOtp] = useState(null);
+  const [selectedCancel, setSelectedCancel] = useState(null);
 
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
       fetchReservations();
     }, [])
   );
@@ -28,7 +32,7 @@ export default function ReservationsScreen({ navigation }) {
   const fetchReservations = async () => {
     try {
       const data = await api.getReservations();
-      setReservations(data);
+      setReservations(data || []);
     } catch (err) {
       console.warn('Error fetching reservations:', err);
     } finally {
@@ -42,275 +46,287 @@ export default function ReservationsScreen({ navigation }) {
     fetchReservations();
   };
 
-  const handleCompletePickup = (reservation) => {
-    Alert.alert(
-      'Verify & Complete Pickup',
-      `Confirming handover from ${reservation.restaurant} with Pickup Code #${reservation.pickupCode}? This will log the rescued meals to your NGO impact report.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Confirm Pickup',
-          onPress: async () => {
-            setCompletingId(reservation.id);
-            try {
-              await api.completeReservation(reservation.id);
-              Alert.alert('Pickup Complete!', 'Impact logged successfully. View your updated stats in History and Profile.');
-              fetchReservations();
-            } catch (err) {
-              Alert.alert('Error', err.message || 'Could not complete pickup.');
-            } finally {
-              setCompletingId(null);
-            }
-          },
-        },
-      ]
-    );
-  };
-
   const renderItem = ({ item }) => (
     <View style={styles.card}>
-      <View style={styles.reservationInfo}>
-        <View style={styles.reservationHeader}>
-          <Text style={styles.restaurant}>{item.restaurant}</Text>
-          <View style={styles.statusBadge}>
-            <Text style={styles.statusText}>{item.status.replace(/_/g, ' ')}</Text>
-          </View>
+      <View style={styles.cardHeader}>
+        <View>
+          <Text style={styles.restoTitle}>{item.restaurant}</Text>
+          <Text style={styles.foodTitle}>{item.foodName}</Text>
         </View>
-
-        <Text style={styles.foodName}>{item.foodName}</Text>
-
-        {/* Pickup Code Box - Critical Feature from Architecture */}
-        <View style={styles.codeContainer}>
-          <View style={styles.codeLabelRow}>
-            <MaterialCommunityIcons name="shield-key" size={16} color="#059669" />
-            <Text style={styles.codeLabel}>Handover Verification Code</Text>
-          </View>
-          <Text style={styles.codeValue}>{item.pickupCode}</Text>
-          <Text style={styles.codeInstruction}>Show this code to restaurant staff at pickup dock</Text>
+        <View style={styles.statusBadge}>
+          <Text style={styles.statusText}>READY FOR PICKUP</Text>
         </View>
+      </View>
 
-        <View style={styles.detailsGrid}>
-          <View style={styles.detailItem}>
-            <MaterialCommunityIcons name="food-takeout-box" size={16} color="#10b981" />
-            <Text style={styles.detailText}>{item.reservedServings} portions locked</Text>
-          </View>
-
-          <View style={styles.detailItem}>
-            <MaterialCommunityIcons name="clock-alert-outline" size={16} color="#f59e0b" />
-            <Text style={styles.detailText}>Pickup by: {item.pickupDeadline}</Text>
-          </View>
-
-          <View style={styles.detailItem}>
-            <MaterialCommunityIcons name="map-marker-outline" size={16} color="#6b7280" />
-            <Text style={styles.detailText} numberOfLines={1}>{item.address}</Text>
-          </View>
-
-          <View style={styles.detailItem}>
-            <MaterialCommunityIcons name="phone-outline" size={16} color="#6b7280" />
-            <Text style={styles.detailText}>{item.restaurantPhone}</Text>
-          </View>
+      <View style={styles.detailsGrid}>
+        <View style={styles.detailCol}>
+          <Text style={styles.detailLabel}>Locked</Text>
+          <Text style={styles.detailValue}>{item.reservedServings} {item.quantityUnit || 'portions'}</Text>
         </View>
-
-        <View style={styles.actionButtons}>
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={() => handleCompletePickup(item)}
-            disabled={completingId === item.id}
-            style={styles.completeButton}
-          >
-            {completingId === item.id ? (
-              <ActivityIndicator size="small" color="#ffffff" />
-            ) : (
-              <>
-                <MaterialCommunityIcons name="check-decagram" size={16} color="#ffffff" />
-                <Text style={styles.buttonText}>Complete Pickup</Text>
-              </>
-            )}
-          </TouchableOpacity>
+        <View style={styles.detailCol}>
+          <Text style={styles.detailLabel}>Deadline</Text>
+          <Text style={[styles.detailValue, { color: '#d97706' }]}>{item.pickupDeadline}</Text>
         </View>
+        <View style={styles.detailCol}>
+          <Text style={styles.detailLabel}>Phone</Text>
+          <Text style={styles.detailValue} numberOfLines={1}>{item.restaurantPhone}</Text>
+        </View>
+      </View>
+
+      <View style={styles.actionsRow}>
+        <TouchableOpacity
+          style={styles.collectBtn}
+          activeOpacity={0.8}
+          onPress={() => setSelectedOtp(item)}
+        >
+          <MaterialCommunityIcons name="qrcode-scan" size={16} color="#ffffff" />
+          <Text style={styles.collectBtnText}>Collect Pickup</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.cancelBtn}
+          activeOpacity={0.8}
+          onPress={() => setSelectedCancel(item)}
+        >
+          <Text style={styles.cancelBtnText}>Drop Pickup</Text>
+        </TouchableOpacity>
       </View>
     </View>
   );
 
-  if (loading && !refreshing) {
-    return (
-      <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#10b981" />
-        <Text style={styles.loadingText}>Fetching active reservations...</Text>
-      </View>
-    );
-  }
-
   return (
-    <View style={styles.container}>
-      <FlatList
-        data={reservations}
-        renderItem={renderItem}
-        keyExtractor={(item) => String(item.id)}
-        contentContainerStyle={styles.flatListContent}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            tintColor="#10b981"
-          />
-        }
-        ListEmptyComponent={
-          <View style={styles.centered}>
-            <MaterialCommunityIcons name="clipboard-check-outline" size={48} color="#9ca3af" />
-            <Text style={styles.emptyTitle}>No active pickups pending</Text>
-            <Text style={styles.emptySubtitle}>
-              Head over to the Discover tab to claim nearby surplus food.
-            </Text>
-          </View>
-        }
+    <SafeAreaView style={styles.container}>
+      <View style={styles.navBar}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => router.replace('/discover')}
+        >
+          <MaterialCommunityIcons name="arrow-left" size={22} color="#111827" />
+          <Text style={styles.navTitle}>Active Pickups</Text>
+        </TouchableOpacity>
+      </View>
+
+      {loading && !refreshing ? (
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color="#10b981" />
+          <Text style={styles.loadingText}>Fetching active pickups...</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={reservations}
+          renderItem={renderItem}
+          keyExtractor={(item) => String(item.id)}
+          contentContainerStyle={styles.list}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={['#10b981']} />}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <MaterialCommunityIcons name="receipt-text-clock-outline" size={48} color="#9ca3af" />
+              <Text style={styles.emptyTitle}>No Active Reservations</Text>
+              <Text style={styles.emptySub}>
+                Head to the Discover feed to claim surplus meals and generate handover OTPs.
+              </Text>
+            </View>
+          }
+        />
+      )}
+
+      <NgoOtpModal
+        visible={Boolean(selectedOtp)}
+        reservation={selectedOtp}
+        onClose={() => setSelectedOtp(null)}
       />
-    </View>
+
+      <CancelReservationModal
+        visible={Boolean(selectedCancel)}
+        reservation={selectedCancel}
+        onClose={() => setSelectedCancel(null)}
+        onSuccess={fetchReservations}
+      />
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f9fafb',
+    backgroundColor: '#f8fafc',
   },
-  flatListContent: {
+  navBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 14,
-    paddingBottom: 24,
+    paddingVertical: 12,
+    backgroundColor: '#ffffff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  backBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  navTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0f172a',
   },
   centered: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    padding: 32,
+    justifyContent: 'center',
   },
   loadingText: {
-    marginTop: 12,
-    fontSize: 14,
+    marginTop: 10,
+    fontSize: 13,
     color: '#6b7280',
   },
-  emptyTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#374151',
-    marginTop: 16,
-  },
-  emptySubtitle: {
-    fontSize: 13,
-    color: '#9ca3af',
-    textAlign: 'center',
-    marginTop: 4,
+  list: {
+    padding: 16,
+    gap: 12,
   },
   card: {
     backgroundColor: '#ffffff',
-    borderRadius: 14,
+    borderRadius: 16,
     padding: 16,
-    marginBottom: 14,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
     borderWidth: 1,
-    borderColor: '#f3f4f6',
+    borderColor: '#e2e8f0',
   },
-  reservationInfo: {
-    flex: 1,
-  },
-  reservationHeader: {
+  cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
+    alignItems: 'flex-start',
+    marginBottom: 10,
   },
-  restaurant: {
+  restoTitle: {
     fontSize: 15,
-    fontWeight: '700',
-    color: '#111827',
+    fontWeight: '800',
+    color: '#0f172a',
+  },
+  foodTitle: {
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 2,
   },
   statusBadge: {
-    backgroundColor: '#dcfce7',
+    backgroundColor: '#ecfdf5',
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
   },
   statusText: {
-    color: '#166534',
-    fontSize: 10,
-    fontWeight: '700',
-    textTransform: 'uppercase',
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#059669',
   },
-  foodName: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
+  codeBox: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#f0fdf4',
+    borderWidth: 1.5,
+    borderColor: '#bbf7d0',
+    borderRadius: 12,
+    padding: 12,
     marginBottom: 12,
   },
-  codeContainer: {
-    backgroundColor: '#f0fdf4',
-    borderWidth: 1,
-    borderColor: '#bbf7d0',
-    borderRadius: 10,
-    padding: 12,
-    alignItems: 'center',
-    marginBottom: 14,
-  },
-  codeLabelRow: {
+  codeBoxLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    marginBottom: 2,
+    gap: 10,
   },
   codeLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#059669',
-    textTransform: 'uppercase',
+    fontSize: 10,
+    color: '#047857',
+    fontWeight: '700',
   },
   codeValue: {
-    fontSize: 26,
-    fontWeight: '800',
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#065f46',
     letterSpacing: 4,
-    color: '#047857',
-    marginVertical: 4,
   },
-  codeInstruction: {
+  tapPill: {
+    backgroundColor: '#059669',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  tapPillText: {
+    color: '#ffffff',
     fontSize: 10,
-    color: '#6b7280',
-    textAlign: 'center',
+    fontWeight: '700',
   },
   detailsGrid: {
-    gap: 6,
-    marginBottom: 14,
-  },
-  detailItem: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    backgroundColor: '#f8fafc',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
   },
-  detailText: {
-    fontSize: 12,
-    color: '#4b5563',
+  detailCol: {
     flex: 1,
   },
-  actionButtons: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
+  detailLabel: {
+    fontSize: 9,
+    color: '#64748b',
+    fontWeight: '600',
   },
-  completeButton: {
+  detailValue: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#0f172a',
+    marginTop: 2,
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  collectBtn: {
+    flex: 2,
+    backgroundColor: '#0f172a',
+    borderRadius: 10,
+    paddingVertical: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#10b981',
-    paddingHorizontal: 16,
-    paddingVertical: 9,
-    borderRadius: 8,
+    justifyContent: 'center',
     gap: 6,
   },
-  buttonText: {
+  collectBtnText: {
     color: '#ffffff',
-    fontSize: 13,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  cancelBtn: {
+    flex: 1,
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelBtnText: {
+    color: '#dc2626',
+    fontSize: 12,
     fontWeight: '700',
+  },
+  empty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  emptyTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#334155',
+    marginTop: 10,
+  },
+  emptySub: {
+    fontSize: 12,
+    color: '#64748b',
+    textAlign: 'center',
+    marginTop: 4,
+    paddingHorizontal: 30,
   },
 });

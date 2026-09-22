@@ -8,39 +8,42 @@ import {
   TextInput,
   StyleSheet,
   Alert,
+  SafeAreaView,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { api } from '../../../src/api/client';
-import LocationPicker from '../../../src/components/LocationPicker';
+import { useAuth } from '../../../src/context/AuthContext';
 
-export default function ProfileScreen({ navigation }) {
+export default function ProfileScreen() {
   const router = useRouter();
+  const { role, logout } = useAuth();
+  const isRestaurant = role === 'RESTAURANT';
+
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editMode, setEditMode] = useState(false);
-  const [mapPickerVisible, setMapPickerVisible] = useState(false);
 
   // Form edit states
   const [editedName, setEditedName] = useState('');
   const [editedOperatingBase, setEditedOperatingBase] = useState('');
-  const [editedRadius, setEditedRadius] = useState('8');
+  const [editedRadius, setEditedRadius] = useState('10');
   const [isSaving, setIsSaving] = useState(false);
 
   useFocusEffect(
     React.useCallback(() => {
       fetchProfile();
-    }, [])
+    }, [role])
   );
 
   const fetchProfile = async () => {
     try {
+      setLoading(true);
       const data = await api.getProfile();
       setProfile(data);
-      setEditedName(data.name || '');
-      setEditedOperatingBase(data.logisticsSetting?.operatingBase || '');
-      setEditedRadius(String(data.logisticsSetting?.defaultRadiusKm || '8'));
+      setEditedName(data?.name || '');
+      setEditedOperatingBase(data?.address || data?.logisticsSetting?.operatingBase || '');
+      setEditedRadius(String(data?.logisticsSetting?.defaultRadiusKm || '10'));
     } catch (err) {
       console.warn('Error loading profile:', err);
     } finally {
@@ -54,10 +57,10 @@ export default function ProfileScreen({ navigation }) {
       await api.updateProfile({
         name: editedName,
         operatingBase: editedOperatingBase,
-        defaultRadiusKm: parseFloat(editedRadius) || 8,
+        defaultRadiusKm: parseFloat(editedRadius) || 10,
       });
       setEditMode(false);
-      Alert.alert('Success', 'Profile details updated.');
+      Alert.alert('Saved', 'Profile and logistics preferences updated.');
       fetchProfile();
     } catch (err) {
       Alert.alert('Error', err.message || 'Could not update profile.');
@@ -66,32 +69,14 @@ export default function ProfileScreen({ navigation }) {
     }
   };
 
-  const handleSaveLocationFromMap = async (locationData) => {
-    try {
-      await api.updateProfile({
-        latitude: locationData.latitude,
-        longitude: locationData.longitude,
-        operatingBase: locationData.operatingBase,
-        defaultRadiusKm: locationData.defaultRadiusKm,
-      });
-      Alert.alert(
-        'Map Location Synced',
-        `Coordinates updated (${locationData.latitude.toFixed(4)}° N, ${locationData.longitude.toFixed(4)}° E). Redis Geo index and PostGIS radius refreshed to ${locationData.defaultRadiusKm} km.`
-      );
-      fetchProfile();
-    } catch (err) {
-      Alert.alert('Error', 'Failed to update map coordinates.');
-    }
-  };
-
   const handleLogout = () => {
-    Alert.alert('Sign out', 'Are you sure you want to sign out?', [
+    Alert.alert('Sign out', 'Are you sure you want to sign out of FeedForward?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Sign out',
         style: 'destructive',
         onPress: async () => {
-          await api.logout();
+          await logout();
           router.replace('/auth/welcome');
         },
       },
@@ -102,479 +87,575 @@ export default function ProfileScreen({ navigation }) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color="#10b981" />
-        <Text style={styles.loadingText}>Loading NGO profile...</Text>
+        <Text style={styles.loadingText}>Loading verified profile...</Text>
       </View>
     );
   }
 
-  if (!profile) return null;
+  const karma = profile?.karmaScore ?? 100;
+  const warnings = profile?.warningCount ?? 0;
+  const strikes = profile?.strikeCount ?? 0;
 
   return (
-    <ScrollView
-      contentContainerStyle={styles.scrollViewContent}
-      showsVerticalScrollIndicator={false}
-    >
-      {!editMode ? (
-        <>
-          {/* Profile Header */}
-          <View style={styles.profileHeader}>
-            <View style={styles.avatarContainer}>
-              <MaterialCommunityIcons name="account-group" size={44} color="#059669" />
+    <SafeAreaView style={styles.container}>
+      {/* Top Header */}
+      <View style={styles.navHeader}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => router.back()}
+          activeOpacity={0.7}
+        >
+          <MaterialCommunityIcons name="arrow-left" size={22} color="#111827" />
+          <Text style={styles.backBtnText}>Back to Feed</Text>
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        {/* Profile Card */}
+        <View style={styles.profileCard}>
+          <View style={styles.avatarRow}>
+            <View style={[styles.avatarCircle, isRestaurant && { backgroundColor: '#fff7ed' }]}>
+              <MaterialCommunityIcons
+                name={isRestaurant ? 'storefront' : 'charity'}
+                size={38}
+                color={isRestaurant ? '#ea580c' : '#10b981'}
+              />
             </View>
-            <View style={styles.profileInfo}>
-              <Text style={styles.profileName}>{profile.name}</Text>
-              <Text style={styles.profileTagline}>{profile.tagline}</Text>
-              <View style={styles.badgeRow}>
-                <View style={styles.verificationBadge}>
-                  <MaterialCommunityIcons name="shield-check" size={14} color="#059669" />
-                  <Text style={styles.verificationText}>NGO Darpan ID: {profile.darpanId}</Text>
+
+            <View style={styles.profileMeta}>
+              <Text style={styles.nameText}>{profile?.name || (isRestaurant ? 'Partner Kitchen' : 'Robin Hood Army')}</Text>
+              <Text style={styles.roleBadge}>
+                {isRestaurant ? 'VERIFIED DONOR PARTNER' : 'VERIFIED RESCUE NGO'}
+              </Text>
+              <Text style={styles.contactText}>{profile?.email || 'user@feedforward.org'}</Text>
+              <Text style={styles.contactText}>{profile?.phone || '+91 98765 43210'}</Text>
+            </View>
+          </View>
+
+          {/* Legal / Certification Badges */}
+          <View style={styles.badgesRow}>
+            {!isRestaurant ? (
+              <>
+                <View style={styles.legalBadge}>
+                  <MaterialCommunityIcons name="certificate" size={14} color="#059669" />
+                  <Text style={styles.legalBadgeText}>{profile?.taxExemption || 'Section 80G Certified'}</Text>
                 </View>
-                <View style={styles.taxBadge}>
-                  <Text style={styles.taxText}>{profile.taxExemption}</Text>
+                <View style={styles.legalBadge}>
+                  <MaterialCommunityIcons name="identifier" size={14} color="#059669" />
+                  <Text style={styles.legalBadgeText}>Darpan: {profile?.darpanId || 'KA/2026/019284'}</Text>
                 </View>
-              </View>
-            </View>
-          </View>
-
-          {/* Impact Statistics Section */}
-          <View style={styles.statsSection}>
-            <Text style={styles.statsSectionTitle}>Verified Rescue Impact</Text>
-            <View style={styles.statsGrid}>
-              <View style={styles.statCard}>
-                <Text style={styles.statNumber}>
-                  {profile.impactStats?.totalMealsRescued?.toLocaleString() || '3,420'}
-                </Text>
-                <Text style={styles.statLabel}>Meals Rescued</Text>
-              </View>
-              <View style={styles.statCard}>
-                <Text style={styles.statNumber}>
-                  +{profile.impactStats?.foodWastePreventedKg?.toLocaleString() || '1,710'} kg
-                </Text>
-                <Text style={styles.statLabel}>Waste Prevented</Text>
-              </View>
-              <View style={styles.statCard}>
-                <Text style={styles.statNumber}>
-                  -{profile.impactStats?.co2eAvoidedTonnes || '4.28'}t
-                </Text>
-                <Text style={styles.statLabel}>CO₂e Avoided</Text>
-              </View>
-              <View style={styles.statCard}>
-                <Text style={styles.statNumber}>
-                  {profile.impactStats?.activeRestaurantPartners || '28'}
-                </Text>
-                <Text style={styles.statLabel}>Donor Partners</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Logistics & Location Section */}
-          <View style={styles.statsSection}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.statsSectionTitle}>Logistics & Geographic Range</Text>
-              <TouchableOpacity
-                onPress={() => setMapPickerVisible(true)}
-                style={styles.mapPinButton}
-              >
-                <MaterialCommunityIcons name="map-marker-radius" size={15} color="#059669" />
-                <Text style={styles.mapPinText}>Edit on Map</Text>
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity
-              onPress={() => setMapPickerVisible(true)}
-              style={styles.logisticsItem}
-              activeOpacity={0.8}
-            >
-              <MaterialCommunityIcons name="map-marker" size={22} color="#ef4444" />
-              <View style={styles.logisticsInfo}>
-                <Text style={styles.logisticsLabel}>Operating Base (Redis Geo Index)</Text>
-                <Text style={styles.logisticsValue}>
-                  {profile.logisticsSetting?.operatingBase || 'Koramangala Depot'}
-                </Text>
-                <Text style={styles.coordsSubtext}>
-                  Lat: {profile.latitude?.toFixed(4) || '12.9352'}° N, Lng: {profile.longitude?.toFixed(4) || '77.6245'}° E
-                </Text>
-              </View>
-              <MaterialCommunityIcons name="chevron-right" size={20} color="#9ca3af" />
-            </TouchableOpacity>
-
-            <View style={styles.logisticsItem}>
-              <MaterialCommunityIcons name="radar" size={22} color="#10b981" />
-              <View style={styles.logisticsInfo}>
-                <Text style={styles.logisticsLabel}>Proximity Radius</Text>
-                <Text style={styles.logisticsValue}>
-                  {profile.logisticsSetting?.defaultRadiusKm || 8} km circular boundary
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.logisticsItem}>
-              <MaterialCommunityIcons name="truck-delivery-outline" size={22} color="#6b7280" />
-              <View style={styles.logisticsInfo}>
-                <Text style={styles.logisticsLabel}>Dispatch Mode</Text>
-                <Text style={styles.logisticsValue}>
-                  {profile.logisticsSetting?.mode || 'NGO Representative Self-Pickup'}
-                </Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Edit Profile Action Button */}
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={() => setEditMode(true)}
-            style={styles.editButton}
-          >
-            <MaterialCommunityIcons name="pencil-outline" size={18} color="#ffffff" />
-            <Text style={styles.editButtonText}>Edit Details</Text>
-          </TouchableOpacity>
-        </>
-      ) : (
-        /* Edit Mode Form */
-        <View style={styles.editFormContainer}>
-          <Text style={styles.editFormTitle}>Edit Organization Details</Text>
-
-          <View style={styles.editFormGroup}>
-            <Text style={styles.editFormLabel}>Organization Name</Text>
-            <TextInput
-              style={styles.editFormInput}
-              value={editedName}
-              onChangeText={setEditedName}
-              placeholder="Enter NGO name"
-            />
-          </View>
-
-          <View style={styles.editFormGroup}>
-            <Text style={styles.editFormLabel}>Operating Depot Address</Text>
-            <TextInput
-              style={styles.editFormInput}
-              value={editedOperatingBase}
-              onChangeText={setEditedOperatingBase}
-              placeholder="e.g. Koramangala Depot"
-            />
-          </View>
-
-          <View style={styles.editFormGroup}>
-            <Text style={styles.editFormLabel}>Search Radius (km)</Text>
-            <TextInput
-              style={styles.editFormInput}
-              value={editedRadius}
-              onChangeText={setEditedRadius}
-              keyboardType="numeric"
-              placeholder="e.g. 8"
-            />
-          </View>
-
-          <View style={styles.editFormActions}>
-            <TouchableOpacity
-              onPress={() => setEditMode(false)}
-              style={styles.cancelButton}
-            >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={handleSaveProfile}
-              disabled={isSaving}
-              style={styles.saveButton}
-            >
-              {isSaving ? (
-                <ActivityIndicator size="small" color="#ffffff" />
-              ) : (
-                <Text style={styles.saveButtonText}>Save</Text>
-              )}
-            </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <View style={[styles.legalBadge, { backgroundColor: '#fff7ed', borderColor: '#fed7aa' }]}>
+                  <MaterialCommunityIcons name="shield-check" size={14} color="#c2410c" />
+                  <Text style={[styles.legalBadgeText, { color: '#c2410c' }]}>
+                    FSSAI: {profile?.fssaiNumber || '11223344556677'}
+                  </Text>
+                </View>
+                <View style={[styles.legalBadge, { backgroundColor: '#fff7ed', borderColor: '#fed7aa' }]}>
+                  <MaterialCommunityIcons name="silverware-fork-knife" size={14} color="#c2410c" />
+                  <Text style={[styles.legalBadgeText, { color: '#c2410c' }]}>
+                    {profile?.cuisineType || 'Multi-Cuisine'}
+                  </Text>
+                </View>
+              </>
+            )}
           </View>
         </View>
-      )}
 
-      <TouchableOpacity
-        activeOpacity={0.8}
-        onPress={handleLogout}
-        style={styles.logoutButton}
-      >
-        <MaterialCommunityIcons name="logout" size={18} color="#dc2626" />
-        <Text style={styles.logoutButtonText}>Sign Out</Text>
-      </TouchableOpacity>
+        {/* Karma & Reputation Meter */}
+        <View style={styles.karmaCard}>
+          <View style={styles.karmaTopRow}>
+            <View>
+              <Text style={styles.karmaTitle}>Platform Trust & Karma</Text>
+              <Text style={styles.karmaSub}>Based on on-time pickups and donation reliability</Text>
+            </View>
+            <View style={styles.karmaCircle}>
+              <Text style={styles.karmaScoreNumber}>{karma}</Text>
+              <Text style={styles.karmaMax}>/ 100</Text>
+            </View>
+          </View>
 
-      {/* Google Maps / Location Picker Modal */}
-      <LocationPicker
-        visible={mapPickerVisible}
-        currentLat={profile.latitude || 12.9352}
-        currentLng={profile.longitude || 77.6245}
-        currentBaseName={profile.logisticsSetting?.operatingBase || 'Koramangala Depot'}
-        currentRadius={profile.logisticsSetting?.defaultRadiusKm || 8}
-        onClose={() => setMapPickerVisible(false)}
-        onSaveLocation={handleSaveLocationFromMap}
-      />
-    </ScrollView>
+          <View style={styles.meterContainer}>
+            <View style={[styles.meterFill, { width: `${Math.min(100, Math.max(10, karma))}%` }]} />
+          </View>
+
+          <View style={styles.trustFooterRow}>
+            <View style={styles.trustItem}>
+              <MaterialCommunityIcons name="check-decagram" size={15} color="#10b981" />
+              <Text style={styles.trustItemText}>
+                {karma >= 80 ? 'Gold Partner' : karma >= 50 ? 'Active Member' : 'Warning Zone'}
+              </Text>
+            </View>
+
+            <View style={styles.trustItem}>
+              <MaterialCommunityIcons
+                name={strikes > 0 ? 'alert-octagon' : 'shield-check-outline'}
+                size={15}
+                color={strikes > 0 ? '#ef4444' : '#6b7280'}
+              />
+              <Text style={styles.trustItemText}>
+                {strikes === 0 ? '0 Policy Strikes' : `${strikes} Strikes (Limit: 3)`}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Impact Metrics */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Rescue & Sustainability Impact</Text>
+        </View>
+
+        <View style={styles.metricsGrid}>
+          <View style={styles.metricCard}>
+            <MaterialCommunityIcons name="silverware-fork-knife" size={24} color="#10b981" />
+            <Text style={styles.metricNumber}>
+              {!isRestaurant ? (profile?.impactStats?.totalMealsRescued ?? 3420) : (profile?.impactStats?.totalMealsDonated ?? 420)}
+            </Text>
+            <Text style={styles.metricLabel}>{!isRestaurant ? 'Meals Rescued' : 'Meals Donated'}</Text>
+          </View>
+
+          <View style={styles.metricCard}>
+            <MaterialCommunityIcons name="trash-can-outline" size={24} color="#f59e0b" />
+            <Text style={styles.metricNumber}>
+              {profile?.impactStats?.foodWastePreventedKg ?? 1710} kg
+            </Text>
+            <Text style={styles.metricLabel}>Food Waste Prevented</Text>
+          </View>
+
+          <View style={styles.metricCard}>
+            <MaterialCommunityIcons name="molecule-co2" size={24} color="#059669" />
+            <Text style={styles.metricNumber}>
+              {profile?.impactStats?.co2eAvoidedTonnes ?? 4.28} T
+            </Text>
+            <Text style={styles.metricLabel}>CO2e Emissions Avoided</Text>
+          </View>
+
+          <View style={styles.metricCard}>
+            <MaterialCommunityIcons name="handshake-outline" size={24} color="#6366f1" />
+            <Text style={styles.metricNumber}>
+              {!isRestaurant ? (profile?.impactStats?.activeRestaurantPartners ?? 28) : '15'}
+            </Text>
+            <Text style={styles.metricLabel}>Active Network Partners</Text>
+          </View>
+        </View>
+
+        {/* Operating Details & Address */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Operating Logistics & Location</Text>
+          {!editMode && (
+            <TouchableOpacity onPress={() => setEditMode(true)}>
+              <Text style={styles.editText}>Edit</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        <View style={styles.detailsCard}>
+          {editMode ? (
+            <View style={styles.editForm}>
+              <Text style={styles.inputLabel}>Organization / Kitchen Name</Text>
+              <TextInput
+                style={styles.input}
+                value={editedName}
+                onChangeText={setEditedName}
+              />
+
+              <Text style={styles.inputLabel}>Operating Base / Street Address</Text>
+              <TextInput
+                style={styles.input}
+                value={editedOperatingBase}
+                onChangeText={setEditedOperatingBase}
+              />
+
+              {!isRestaurant && (
+                <>
+                  <Text style={styles.inputLabel}>Pickup Radius (km)</Text>
+                  <TextInput
+                    style={styles.input}
+                    keyboardType="numeric"
+                    value={editedRadius}
+                    onChangeText={setEditedRadius}
+                  />
+                </>
+              )}
+
+              <View style={styles.editBtnRow}>
+                <TouchableOpacity
+                  style={styles.cancelEditBtn}
+                  onPress={() => setEditMode(false)}
+                >
+                  <Text style={styles.cancelEditText}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.saveEditBtn}
+                  onPress={handleSaveProfile}
+                  disabled={isSaving}
+                >
+                  {isSaving ? (
+                    <ActivityIndicator color="#ffffff" size="small" />
+                  ) : (
+                    <Text style={styles.saveEditText}>Save Changes</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.readonlyDetails}>
+              <View style={styles.detailRow}>
+                <MaterialCommunityIcons name="map-marker-outline" size={18} color="#6b7280" />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.detailLabel}>Operating Address</Text>
+                  <Text style={styles.detailVal}>
+                    {profile?.address || profile?.logisticsSetting?.operatingBase || 'Koramangala Community Depot, Bengaluru'}
+                  </Text>
+                </View>
+              </View>
+
+              {!isRestaurant && (
+                <View style={styles.detailRow}>
+                  <MaterialCommunityIcons name="radius-outline" size={18} color="#6b7280" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.detailLabel}>Rescue Coverage Radius</Text>
+                    <Text style={styles.detailVal}>{profile?.logisticsSetting?.defaultRadiusKm || 10} km radius</Text>
+                  </View>
+                </View>
+              )}
+
+              <View style={styles.detailRow}>
+                <MaterialCommunityIcons name="google-maps" size={18} color="#059669" />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.detailLabel}>GPS Coordinates</Text>
+                  <Text style={styles.detailVal}>
+                    {profile?.latitude ? `${profile.latitude.toFixed(4)}° N, ${profile.longitude?.toFixed(4)}° E` : '12.9352° N, 77.6245° E'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+        </View>
+
+        {/* Sign Out Button */}
+        <TouchableOpacity
+          style={styles.logoutBtn}
+          activeOpacity={0.8}
+          onPress={handleLogout}
+        >
+          <MaterialCommunityIcons name="logout" size={18} color="#ef4444" />
+          <Text style={styles.logoutBtnText}>Sign Out of FeedForward</Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  scrollViewContent: {
-    paddingHorizontal: 16,
-    paddingVertical: 18,
-    paddingBottom: 36,
-    backgroundColor: '#f9fafb',
+  container: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
   },
   centered: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
-    padding: 32,
+    justifyContent: 'center',
   },
   loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: '#6b7280',
-  },
-  profileHeader: {
-    alignItems: 'center',
-    marginBottom: 24,
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: '#f3f4f6',
-  },
-  avatarContainer: {
-    backgroundColor: '#d1fae5',
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  profileInfo: {
-    alignItems: 'center',
-  },
-  profileName: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#111827',
-    textAlign: 'center',
-    marginBottom: 4,
-  },
-  profileTagline: {
+    marginTop: 10,
     fontSize: 13,
     color: '#6b7280',
-    textAlign: 'center',
-    lineHeight: 18,
-    marginBottom: 10,
   },
-  badgeRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    justifyContent: 'center',
-  },
-  verificationBadge: {
+  navHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ecfdf5',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 14,
-    gap: 4,
-  },
-  verificationText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#065f46',
-  },
-  taxBadge: {
-    backgroundColor: '#f3f4f6',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 14,
-  },
-  taxText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#4b5563',
-  },
-  statsSection: {
-    marginBottom: 20,
-  },
-  sectionHeaderRow: {
-    flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  statsSectionTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#111827',
-    marginBottom: 10,
-  },
-  mapPinButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#ecfdf5',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    gap: 4,
-  },
-  mapPinText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#059669',
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  statCard: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     backgroundColor: '#ffffff',
-    borderRadius: 12,
-    padding: 14,
-    width: '48%',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 2,
-    elevation: 1,
-    borderWidth: 1,
-    borderColor: '#f3f4f6',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
   },
-  statNumber: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#10b981',
-    marginBottom: 2,
-  },
-  statLabel: {
-    fontSize: 11,
-    color: '#6b7280',
-    fontWeight: '500',
-  },
-  logisticsItem: {
+  backBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 14,
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#f3f4f6',
-  },
-  logisticsInfo: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  logisticsLabel: {
-    fontSize: 12,
-    color: '#6b7280',
-    fontWeight: '500',
-    marginBottom: 2,
-  },
-  logisticsValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  coordsSubtext: {
-    fontSize: 11,
-    color: '#059669',
-    marginTop: 2,
-    fontWeight: '500',
-  },
-  editButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#10b981',
-    paddingVertical: 13,
-    borderRadius: 10,
-    marginTop: 10,
     gap: 6,
   },
-  editButtonText: {
-    color: '#ffffff',
+  backBtnText: {
     fontSize: 14,
-    fontWeight: '700',
-  },
-  logoutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    borderWidth: 1,
-    borderColor: '#fecaca',
-    backgroundColor: '#fff1f2',
-    paddingVertical: 13,
-    borderRadius: 10,
-    marginTop: 12,
-  },
-  logoutButtonText: {
-    color: '#dc2626',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  editFormContainer: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: '#f3f4f6',
-  },
-  editFormTitle: {
-    fontSize: 17,
     fontWeight: '700',
     color: '#111827',
-    marginBottom: 16,
-    textAlign: 'center',
   },
-  editFormGroup: {
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 32,
+  },
+  profileCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 18,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
     marginBottom: 14,
   },
-  editFormLabel: {
-    fontSize: 13,
+  avatarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  avatarCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#ecfdf5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileMeta: {
+    flex: 1,
+  },
+  nameText: {
+    fontSize: 17,
+    fontWeight: '900',
+    color: '#0f172a',
+  },
+  roleBadge: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#10b981',
+    letterSpacing: 0.5,
+    marginVertical: 2,
+  },
+  contactText: {
+    fontSize: 12,
+    color: '#64748b',
+  },
+  badgesRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+    paddingTop: 12,
+  },
+  legalBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0fdf4',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    gap: 4,
+  },
+  legalBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#047857',
+  },
+  karmaCard: {
+    backgroundColor: '#111827',
+    borderRadius: 18,
+    padding: 18,
+    marginBottom: 16,
+  },
+  karmaTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  karmaTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#ffffff',
+  },
+  karmaSub: {
+    fontSize: 11,
+    color: '#9ca3af',
+    marginTop: 2,
+    maxWidth: 220,
+  },
+  karmaCircle: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    backgroundColor: '#1f2937',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  karmaScoreNumber: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#10b981',
+  },
+  karmaMax: {
+    fontSize: 12,
+    color: '#9ca3af',
+    marginLeft: 2,
+  },
+  meterContainer: {
+    height: 8,
+    backgroundColor: '#374151',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+  meterFill: {
+    height: '100%',
+    backgroundColor: '#10b981',
+    borderRadius: 4,
+  },
+  trustFooterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: '#1f2937',
+    paddingTop: 10,
+  },
+  trustItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  trustItemText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#e5e7eb',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+    marginTop: 4,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0f172a',
+  },
+  editText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#10b981',
+  },
+  metricsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 16,
+  },
+  metricCard: {
+    width: '48%',
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  metricNumber: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#0f172a',
+    marginTop: 6,
+  },
+  metricLabel: {
+    fontSize: 11,
+    color: '#64748b',
     fontWeight: '600',
-    color: '#374151',
+    marginTop: 2,
+  },
+  detailsCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    marginBottom: 20,
+  },
+  readonlyDetails: {
+    gap: 14,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  detailLabel: {
+    fontSize: 11,
+    color: '#64748b',
+    fontWeight: '600',
+  },
+  detailVal: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0f172a',
+    marginTop: 1,
+  },
+  editForm: {
+    gap: 8,
+  },
+  inputLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  input: {
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 13,
+    color: '#0f172a',
     marginBottom: 6,
   },
-  editFormInput: {
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    backgroundColor: '#fafafa',
-  },
-  editFormActions: {
+  editBtnRow: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 18,
+    marginTop: 8,
   },
-  cancelButton: {
+  cancelEditBtn: {
     flex: 1,
-    backgroundColor: '#f3f4f6',
-    paddingVertical: 12,
-    borderRadius: 8,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#f1f5f9',
     alignItems: 'center',
   },
-  cancelButtonText: {
-    color: '#4b5563',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  saveButton: {
-    flex: 1,
-    backgroundColor: '#10b981',
-    paddingVertical: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  saveButtonText: {
-    color: '#ffffff',
-    fontSize: 14,
+  cancelEditText: {
+    fontSize: 12,
     fontWeight: '700',
+    color: '#475569',
+  },
+  saveEditBtn: {
+    flex: 2,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#10b981',
+    alignItems: 'center',
+  },
+  saveEditText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#ffffff',
+  },
+  logoutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fef2f2',
+    borderWidth: 1,
+    borderColor: '#fecaca',
+    borderRadius: 12,
+    paddingVertical: 13,
+    gap: 6,
+  },
+  logoutBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#dc2626',
   },
 });

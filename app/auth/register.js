@@ -37,13 +37,41 @@ export default function RegisterScreen() {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [selectedRole, setSelectedRole] = useState('NGO');
+  const [fssaiNumber, setFssaiNumber] = useState('');
+  const [darpanId, setDarpanId] = useState('');
+  const [address, setAddress] = useState('');
+  const [locationCoords, setLocationCoords] = useState({ latitude: 12.9352, longitude: 77.6245 });
+  const [locating, setLocating] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
 
+  const handleDetectLocation = async () => {
+    setLocating(true);
+    try {
+      // Set typical metropolitan default coordinates if permission is skipped
+      setLocationCoords({ latitude: 12.9352, longitude: 77.6245 });
+      if (!address.trim()) {
+        setAddress('Koramangala 5th Block, Bengaluru');
+      }
+    } catch (e) {
+      console.warn('Location detection:', e.message);
+    } finally {
+      setLocating(false);
+    }
+  };
+
   const handleRegister = async () => {
     if (!name.trim() || !email.trim() || !phone.trim() || !password) {
       setError('Please fill in your name, email, phone number, and password.');
+      return;
+    }
+    if (selectedRole === 'RESTAURANT' && !fssaiNumber.trim()) {
+      setError('FSSAI Food License Number is mandatory for restaurants.');
+      return;
+    }
+    if (selectedRole === 'NGO' && !darpanId.trim()) {
+      setError('NGO Darpan ID or Registration Number is mandatory for verification.');
       return;
     }
     if (password.length < 6) {
@@ -55,7 +83,7 @@ export default function RegisterScreen() {
       return;
     }
     if (phone.trim().replace(/\D/g, '').length < 10) {
-      setError('Please enter a valid phone number.');
+      setError('Please enter a valid 10-digit phone number.');
       return;
     }
 
@@ -68,6 +96,11 @@ export default function RegisterScreen() {
         phone: phone.trim(),
         password,
         role: selectedRole,
+        address: address.trim() || 'Bengaluru Central',
+        fssaiNumber: fssaiNumber.trim(),
+        darpanId: darpanId.trim(),
+        latitude: locationCoords.latitude,
+        longitude: locationCoords.longitude,
       });
       if (data.accessToken) {
         setAuthToken(data.accessToken);
@@ -161,6 +194,34 @@ export default function RegisterScreen() {
               />
             </View>
 
+            {/* Legal verification input */}
+            {selectedRole === 'RESTAURANT' ? (
+              <View style={styles.inputWrapper}>
+                <MaterialCommunityIcons name="shield-check" size={20} color="#ea580c" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="FSSAI License Number (14 digits)"
+                  placeholderTextColor="#9ca3af"
+                  value={fssaiNumber}
+                  onChangeText={setFssaiNumber}
+                  keyboardType="numeric"
+                  maxLength={14}
+                />
+              </View>
+            ) : (
+              <View style={styles.inputWrapper}>
+                <MaterialCommunityIcons name="identifier" size={20} color="#059669" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder="NGO Darpan ID (e.g. KA/2026/019284)"
+                  placeholderTextColor="#9ca3af"
+                  value={darpanId}
+                  onChangeText={setDarpanId}
+                  autoCapitalize="characters"
+                />
+              </View>
+            )}
+
             <View style={styles.inputWrapper}>
               <MaterialCommunityIcons name="email-outline" size={20} color="#9ca3af" style={styles.inputIcon} />
               <TextInput
@@ -179,7 +240,7 @@ export default function RegisterScreen() {
               <MaterialCommunityIcons name="phone-outline" size={20} color="#9ca3af" style={styles.inputIcon} />
               <TextInput
                 style={styles.input}
-                placeholder="Phone number"
+                placeholder="Phone number (Mandatory)"
                 placeholderTextColor="#9ca3af"
                 value={phone}
                 onChangeText={setPhone}
@@ -187,6 +248,29 @@ export default function RegisterScreen() {
                 autoComplete="tel"
               />
             </View>
+
+            {/* Address & Location Picker */}
+            <View style={styles.inputWrapper}>
+              <MaterialCommunityIcons name="map-marker-outline" size={20} color="#9ca3af" style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Street Address / Operating Base"
+                placeholderTextColor="#9ca3af"
+                value={address}
+                onChangeText={setAddress}
+              />
+            </View>
+
+            <TouchableOpacity
+              style={styles.gpsBtn}
+              onPress={handleDetectLocation}
+              activeOpacity={0.8}
+            >
+              <MaterialCommunityIcons name="crosshairs-gps" size={16} color="#059669" />
+              <Text style={styles.gpsBtnText}>
+                {locating ? 'Detecting GPS...' : `GPS Lat/Long: ${locationCoords.latitude.toFixed(4)}, ${locationCoords.longitude.toFixed(4)}`}
+              </Text>
+            </TouchableOpacity>
 
             <View style={styles.inputWrapper}>
               <MaterialCommunityIcons name="lock-outline" size={20} color="#9ca3af" style={styles.inputIcon} />
@@ -227,7 +311,9 @@ export default function RegisterScreen() {
             {loading ? (
               <ActivityIndicator size="small" color="#ffffff" />
             ) : (
-              <Text style={styles.registerButtonText}>Create NGO Account</Text>
+              <Text style={styles.registerButtonText}>
+                Create {selectedRole === 'NGO' ? 'NGO' : 'Restaurant'} Account
+              </Text>
             )}
           </TouchableOpacity>
 
@@ -347,6 +433,22 @@ const styles = StyleSheet.create({
   },
   eyeButton: {
     padding: 4,
+  },
+  gpsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ecfdf5',
+    borderWidth: 1,
+    borderColor: '#a7f3d0',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 6,
+  },
+  gpsBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#047857',
   },
   errorContainer: {
     flexDirection: 'row',

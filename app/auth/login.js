@@ -20,6 +20,7 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [channel, setChannel] = useState('email');
+  const [selectedRole, setSelectedRole] = useState('NGO');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -36,7 +37,13 @@ export default function LoginScreen() {
       const data = await api.login(email.trim().toLowerCase(), password, channel);
       router.push({
         pathname: '/auth/otp-verify',
-        params: { mode: 'login', challengeId: data.challengeId, channel, destination: data.destination },
+        params: {
+          mode: 'login',
+          challengeId: data.challengeId,
+          channel,
+          destination: data.destination,
+          devOtp: data.devOtp || '123456'
+        },
       });
     } catch (err) {
       setError(err.message || 'Invalid email or password. Please try again.');
@@ -62,9 +69,46 @@ export default function LoginScreen() {
 
         {/* Header */}
         <View style={styles.header}>
-          <MaterialCommunityIcons name="leaf-circle" size={44} color="#10b981" />
+          <MaterialCommunityIcons
+            name={selectedRole === 'NGO' ? 'leaf-circle' : 'storefront'}
+            size={44}
+            color={selectedRole === 'NGO' ? '#10b981' : '#ea580c'}
+          />
           <Text style={styles.title}>Welcome Back</Text>
-          <Text style={styles.subtitle}>Sign in to your NGO account</Text>
+          <Text style={styles.subtitle}>
+            Sign in as {selectedRole === 'NGO' ? 'an NGO Rescuer' : 'a Restaurant Donor'}
+          </Text>
+        </View>
+
+        {/* Role Tab Switcher */}
+        <View style={styles.roleTabsContainer}>
+          <TouchableOpacity
+            style={[styles.roleTab, selectedRole === 'NGO' && styles.activeNgoTab]}
+            onPress={() => setSelectedRole('NGO')}
+          >
+            <MaterialCommunityIcons
+              name="charity"
+              size={18}
+              color={selectedRole === 'NGO' ? '#059669' : '#6b7280'}
+            />
+            <Text style={[styles.roleTabText, selectedRole === 'NGO' && styles.activeNgoTabText]}>
+              NGO Rescuer
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.roleTab, selectedRole === 'RESTAURANT' && styles.activeRestoTab]}
+            onPress={() => setSelectedRole('RESTAURANT')}
+          >
+            <MaterialCommunityIcons
+              name="store"
+              size={18}
+              color={selectedRole === 'RESTAURANT' ? '#ea580c' : '#6b7280'}
+            />
+            <Text style={[styles.roleTabText, selectedRole === 'RESTAURANT' && styles.activeRestoTabText]}>
+              Restaurant / Donor
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* Form */}
@@ -211,6 +255,48 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 14,
     color: '#6b7280',
+  },
+  roleTabsContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#f3f4f6',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 20,
+    gap: 6,
+  },
+  roleTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 10,
+    gap: 6,
+  },
+  activeNgoTab: {
+    backgroundColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  activeRestoTab: {
+    backgroundColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  roleTabText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6b7280',
+  },
+  activeNgoTabText: {
+    color: '#047857',
+  },
+  activeRestoTabText: {
+    color: '#ea580c',
   },
   form: {
     gap: 12,

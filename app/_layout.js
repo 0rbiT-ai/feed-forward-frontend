@@ -4,8 +4,9 @@ import { StatusBar } from 'expo-status-bar';
 import { Redirect, Stack, useSegments } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { loadAuthToken, subscribeAuthToken } from '../src/api/client';
+import { AuthProvider, useAuth } from '../src/context/AuthContext';
 
-export default function RootLayout() {
+function RootNavigation() {
   const segments = useSegments();
   const [authReady, setAuthReady] = useState(false);
   const [hasToken, setHasToken] = useState(false);
@@ -21,7 +22,7 @@ export default function RootLayout() {
   const inAuthGroup = segments[0] === 'auth';
 
   return (
-    <SafeAreaProvider>
+    <>
       <StatusBar style="dark" />
       <Stack screenOptions={{ headerShown: false }} />
       {!authReady ? (
@@ -33,6 +34,16 @@ export default function RootLayout() {
       ) : hasToken && inAuthGroup ? (
         <Redirect href="/discover" />
       ) : null}
+    </>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <SafeAreaProvider>
+      <AuthProvider>
+        <RootNavigation />
+      </AuthProvider>
     </SafeAreaProvider>
   );
 }
