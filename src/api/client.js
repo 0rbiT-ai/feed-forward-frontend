@@ -23,22 +23,75 @@ const apiClient = createAxios({
 });
 
 let authToken = null;
+let refreshToken = null;
+let refreshPromise = null;
 const authTokenListeners = new Set();
+
+export const setRefreshToken = (token) => {
+  refreshToken = token || null;
+  if (refreshToken) {
+    return AuthStorage.setItemAsync('feedforward_refresh_token', refreshToken).catch(() => {});
+  } else {
+    return AuthStorage.deleteItemAsync('feedforward_refresh_token').catch(() => {});
+  }
+};
+
+export const setAuthTokens = (accessToken, nextRefreshToken) => {
+  setAuthToken(accessToken);
+  return setRefreshToken(nextRefreshToken);
+};
 
 apiClient.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     const status = error.response?.status;
     const message = error.response?.data?.message;
     const invalidSession = (status === 401 || status === 403) &&
       /invalid or expired access token|access token missing/i.test(message || '');
+    const originalRequest = error.config;
 
-    // Some endpoints use 403 for role/permission checks. Only clear the session
-    // when the backend identifies the access token itself as invalid.
-    if (authToken && invalidSession) setAuthToken(null);
+    // Retry one protected request after renewing the access token. Permission
+    // errors and auth endpoints must never trigger a refresh attempt.
+    const isRefreshRequest = originalRequest?.url?.includes('/token/refresh');
+    const isAuthRequest = originalRequest?.url?.startsWith('/auth/');
+    if (invalidSession && originalRequest && !originalRequest._retried && !isRefreshRequest && !isAuthRequest) {
+      originalRequest._retried = true;
+      try {
+        const newAccessToken = await refreshAccessToken();
+        originalRequest.headers = originalRequest.headers || {};
+        originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+        return apiClient(originalRequest);
+      } catch (refreshError) {
+        clearAuthTokens();
+        return Promise.reject(refreshError);
+      }
+    }
+    if (invalidSession && originalRequest?._retried) clearAuthTokens();
     return Promise.reject(error);
   },
 );
+
+const clearAuthTokens = () => {
+  setAuthToken(null);
+  setRefreshToken(null);
+};
+
+const refreshAccessToken = async () => {
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      const token = refreshToken || await AuthStorage.getItemAsync('feedforward_refresh_token');
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
+      refreshToken = token;
+      const response = await apiClient.post('/token/refresh', { refreshToken: token });
+      if (!response.data?.accessToken) throw new Error('Could not renew your session. Please sign in again.');
+      setAuthToken(response.data.accessToken);
+      return response.data.accessToken;
+    })().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+};
 
 export const setAuthToken = (token) => {
   authToken = token;
@@ -59,8 +112,19 @@ export const subscribeAuthToken = (listener) => {
 
 export const loadAuthToken = async () => {
   const token = await AuthStorage.getItemAsync('feedforward_access_token');
-  if (token) setAuthToken(token);
-  return token;
+  refreshToken = await AuthStorage.getItemAsync('feedforward_refresh_token');
+  if (token) {
+    setAuthToken(token);
+    return token;
+  }
+  if (refreshToken) {
+    try {
+      return await refreshAccessToken();
+    } catch {
+      clearAuthTokens();
+    }
+  }
+  return null;
 };
 
 export const getAuthToken = () => authToken;
@@ -74,7 +138,7 @@ export const api = {
     } catch (err) {
       if (err.response?.data) throw err.response.data;
     } finally {
-      setAuthToken(null);
+      clearAuthTokens();
     }
   },
 
@@ -121,7 +185,7 @@ export const api = {
   async verifyLoginOtp(challengeId, otp) {
     try {
       const res = await apiClient.post('/auth/login/verify-otp', { challengeId, otp });
-      if (res.data?.accessToken) setAuthToken(res.data.accessToken);
+      if (res.data?.accessToken) await setAuthTokens(res.data.accessToken, res.data.refreshToken);
       return res.data;
     } catch (err) {
       if (err.response?.data) throw err.response.data;
@@ -152,7 +216,7 @@ export const api = {
   async completePasswordReset(resetToken, password) {
     try {
       const res = await apiClient.post('/auth/password-reset/complete', { resetToken, password });
-      if (res.data?.accessToken) setAuthToken(res.data.accessToken);
+      if (res.data?.accessToken) await setAuthTokens(res.data.accessToken, res.data.refreshToken);
       return res.data;
     } catch (err) {
       if (err.response?.data) throw err.response.data;

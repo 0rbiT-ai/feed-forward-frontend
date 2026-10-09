@@ -8,6 +8,7 @@ import {
   StyleSheet,
   RefreshControl,
   SafeAreaView,
+  Linking,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -23,12 +24,6 @@ export default function ReservationsScreen() {
   const [selectedOtp, setSelectedOtp] = useState(null);
   const [selectedCancel, setSelectedCancel] = useState(null);
 
-  useFocusEffect(
-    useCallback(() => {
-      fetchReservations();
-    }, [])
-  );
-
   const fetchReservations = async () => {
     try {
       const data = await api.getReservations();
@@ -41,20 +36,45 @@ export default function ReservationsScreen() {
     }
   };
 
+  useFocusEffect(
+    useCallback(() => {
+      fetchReservations();
+    }, [])
+  );
+
   const handleRefresh = () => {
     setRefreshing(true);
     fetchReservations();
   };
 
+  const callRestaurant = (phone) => {
+    const value = String(phone || '').trim();
+    if (!value || !/[0-9]/.test(value)) return;
+    Linking.openURL(`tel:${value.replace(/[^\d+]/g, '')}`).catch((error) => {
+      console.warn('Could not open phone app:', error.message);
+    });
+  };
+
   const renderItem = ({ item }) => (
     <View style={styles.card}>
       <View style={styles.cardHeader}>
-        <View>
-          <Text style={styles.restoTitle}>{item.restaurant}</Text>
+        <View style={styles.titleWrap}>
+          <Text style={styles.restoTitle} numberOfLines={1}>{item.restaurant}</Text>
           <Text style={styles.foodTitle}>{item.foodName}</Text>
         </View>
-        <View style={styles.statusBadge}>
-          <Text style={styles.statusText}>READY FOR PICKUP</Text>
+        <View style={styles.headerActions}>
+          <View style={styles.statusBadge}>
+            <Text style={styles.statusText}>READY FOR PICKUP</Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.callIconButton, !item.restaurantPhone && styles.callIconButtonDisabled]}
+            onPress={() => callRestaurant(item.restaurantPhone)}
+            disabled={!item.restaurantPhone}
+            accessibilityRole="button"
+            accessibilityLabel="Call restaurant"
+          >
+            <MaterialCommunityIcons name="phone" size={15} color={item.restaurantPhone ? '#047857' : '#94a3b8'} />
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -66,10 +86,6 @@ export default function ReservationsScreen() {
         <View style={styles.detailCol}>
           <Text style={styles.detailLabel}>Deadline</Text>
           <Text style={[styles.detailValue, { color: '#d97706' }]}>{item.pickupDeadline}</Text>
-        </View>
-        <View style={styles.detailCol}>
-          <Text style={styles.detailLabel}>Phone</Text>
-          <Text style={styles.detailValue} numberOfLines={1}>{item.restaurantPhone}</Text>
         </View>
       </View>
 
@@ -197,6 +213,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 10,
   },
+  titleWrap: { flex: 1, minWidth: 0, marginRight: 8 },
   restoTitle: {
     fontSize: 15,
     fontWeight: '800',
@@ -277,6 +294,9 @@ const styles = StyleSheet.create({
     color: '#0f172a',
     marginTop: 2,
   },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
+  callIconButton: { width: 32, height: 32, borderRadius: 8, borderWidth: 1, borderColor: '#a7f3d0', backgroundColor: '#ecfdf5', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  callIconButtonDisabled: { borderColor: '#e2e8f0', backgroundColor: '#f1f5f9' },
   actionsRow: {
     flexDirection: 'row',
     gap: 10,

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet, Linking, Alert } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { setAuthToken } from '../../src/api/client';
+import { setAuthTokens } from '../../src/api/client';
 
 const apiBaseUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5003';
 
@@ -30,7 +30,7 @@ export default function GoogleOAuthScreen() {
         const callback = new URL(url);
         const accessToken = callback.searchParams.get('accessToken');
         if (!accessToken) throw new Error('Google did not return an access token');
-        setAuthToken(accessToken);
+        void setAuthTokens(accessToken, callback.searchParams.get('refreshToken'));
         router.replace('/discover');
       } catch (callbackError) {
         if (mounted) setError(callbackError.message);

@@ -15,6 +15,7 @@ import {
   KeyboardAvoidingView,
   TouchableWithoutFeedback,
   Keyboard,
+  Linking,
   Platform,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -43,6 +44,13 @@ const getRestaurantListingCategory = (item) => {
     COOKED_MEAL: 'Cooked Food',
     PACKAGED: 'Packaged',
   })[item.itemType] || 'Cooked Food';
+};
+
+const callPhoneNumber = (phone) => {
+  const value = String(phone || '').trim();
+  if (!value || !/[0-9]/.test(value)) return;
+  const uri = `tel:${value.replace(/[^\d+]/g, '')}`;
+  Linking.openURL(uri).catch((error) => console.warn('Could not open phone app:', error.message));
 };
 
 export default function DiscoverScreen() {
@@ -464,12 +472,23 @@ export default function DiscoverScreen() {
   const renderPickupCard = ({ item }) => (
     <View style={styles.pickupCard}>
       <View style={styles.pickupHeader}>
-        <View>
-          <Text style={styles.pickupResto}>{item.restaurant}</Text>
+        <View style={styles.pickupTitleWrap}>
+          <Text style={styles.pickupResto} numberOfLines={1}>{item.restaurant}</Text>
           <Text style={styles.pickupFood}>{item.foodName}</Text>
         </View>
-        <View style={styles.readyBadge}>
-          <Text style={styles.readyBadgeText}>READY FOR PICKUP</Text>
+        <View style={styles.pickupHeaderActions}>
+          <View style={styles.readyBadge}>
+            <Text style={styles.readyBadgeText}>READY FOR PICKUP</Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.callIconButton, !item.restaurantPhone && styles.callIconButtonDisabled]}
+            onPress={() => callPhoneNumber(item.restaurantPhone)}
+            disabled={!item.restaurantPhone}
+            accessibilityRole="button"
+            accessibilityLabel="Call restaurant"
+          >
+            <MaterialCommunityIcons name="phone" size={15} color={item.restaurantPhone ? '#047857' : '#94a3b8'} />
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -481,10 +500,6 @@ export default function DiscoverScreen() {
         <View style={styles.metaCol}>
           <Text style={styles.metaLabel}>Pickup Deadline</Text>
           <Text style={[styles.metaVal, { color: '#d97706' }]}>{item.pickupDeadline}</Text>
-        </View>
-        <View style={styles.metaCol}>
-          <Text style={styles.metaLabel}>Restaurant Phone</Text>
-          <Text style={styles.metaVal}>{item.restaurantPhone}</Text>
         </View>
       </View>
 
@@ -601,14 +616,23 @@ export default function DiscoverScreen() {
   // ------------------------------------------
   const renderIncomingPickupCard = ({ item }) => (
     <View style={styles.incomingCard}>
-      <View style={styles.cardHeaderRow}>
-        <View>
-          <Text style={styles.incomingNgo}>{item.ngoName}</Text>
+      <View style={[styles.cardHeaderRow, styles.incomingHeader]}>
+        <View style={styles.incomingTitleWrap}>
+          <Text style={styles.incomingNgo} numberOfLines={1}>{item.ngoName}</Text>
           <Text style={styles.incomingFood}>{item.foodName}</Text>
+          <View style={styles.karmaBadgeSmall}>
+            <Text style={styles.karmaBadgeSmallText}>NGO Karma: {item.ngoKarma}</Text>
+          </View>
         </View>
-        <View style={styles.karmaBadgeSmall}>
-          <Text style={styles.karmaBadgeSmallText}>NGO Karma: {item.ngoKarma}</Text>
-        </View>
+        <TouchableOpacity
+          style={[styles.callIconButton, styles.incomingCallButton, !item.ngoPhone && styles.callIconButtonDisabled]}
+          onPress={() => callPhoneNumber(item.ngoPhone)}
+          disabled={!item.ngoPhone}
+          accessibilityRole="button"
+          accessibilityLabel="Call NGO"
+        >
+          <MaterialCommunityIcons name="phone" size={15} color={item.ngoPhone ? '#047857' : '#94a3b8'} />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.incomingMetaRow}>
@@ -1197,6 +1221,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 10,
   },
+  pickupTitleWrap: { flex: 1, minWidth: 0, marginRight: 8 },
   pickupResto: {
     fontSize: 15,
     fontWeight: '800',
@@ -1277,6 +1302,9 @@ const styles = StyleSheet.create({
     color: '#0f172a',
     marginTop: 2,
   },
+  callIconButton: { width: 32, height: 32, borderRadius: 8, borderWidth: 1, borderColor: '#a7f3d0', backgroundColor: '#ecfdf5', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  callIconButtonDisabled: { borderColor: '#e2e8f0', backgroundColor: '#f1f5f9' },
+  pickupHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
   pickupActionsRow: {
     flexDirection: 'row',
     gap: 10,
@@ -1537,7 +1565,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     color: '#0f172a',
+    flexShrink: 1,
   },
+  incomingHeader: { alignItems: 'flex-start', gap: 8 },
+  incomingTitleWrap: { flex: 1, minWidth: 0, marginRight: 4 },
+  incomingCallButton: { marginRight: -4 },
   incomingFood: {
     fontSize: 12,
     color: '#64748b',
@@ -1548,9 +1580,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
+    alignSelf: 'flex-start',
+    marginTop: 4,
   },
   karmaBadgeSmallText: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '700',
     color: '#b45309',
   },
