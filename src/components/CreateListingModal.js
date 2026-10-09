@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Modal,
   View,
@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { api } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 
 const CATEGORIES = [
   { id: 'Cooked Food', label: 'Cooked Meal', type: 'COOKED_MEAL', defaultUnit: 'servings', icon: 'food-drumstick' },
@@ -33,7 +34,8 @@ const SAFE_WINDOWS = [
   { hours: 168, label: '7 Days (Dry Goods)' },
 ];
 
-export default function CreateListingModal({ visible, onClose, onSuccess }) {
+export default function CreateListingModal({ visible, onClose, onSuccess, listing = null }) {
+  const { profile } = useAuth();
   const [selectedCat, setSelectedCat] = useState(CATEGORIES[0]);
   const [foodName, setFoodName] = useState('');
   const [quantity, setQuantity] = useState('30');
@@ -42,6 +44,25 @@ export default function CreateListingModal({ visible, onClose, onSuccess }) {
   const [isVeg, setIsVeg] = useState(true);
   const [storageNotes, setStorageNotes] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!visible) return;
+    if (listing) {
+      const category = CATEGORIES.find(cat => cat.id === listing.category) || CATEGORIES[0];
+      setSelectedCat(category);
+      setFoodName(listing.foodName || '');
+      setQuantity(String(listing.totalServings || 1));
+      setUnit(listing.quantityUnit || category.defaultUnit);
+      setSafeHours(Math.max(1, Math.round((new Date(listing.safeUntil) - Date.now()) / 3600000)));
+      setIsVeg(Boolean(listing.isVeg));
+      setStorageNotes(listing.storageInstructions || '');
+    } else {
+      handleSelectCategory(CATEGORIES[0]);
+      setFoodName('');
+      setQuantity('30');
+      setStorageNotes('');
+    }
+  }, [listing, visible]);
 
   const handleSelectCategory = (cat) => {
     setSelectedCat(cat);
@@ -67,14 +88,21 @@ export default function CreateListingModal({ visible, onClose, onSuccess }) {
       return;
     }
     const qty = parseInt(quantity, 10);
-    if (isNaN(qty) || qty <= 0) {
-      Alert.alert('Invalid Quantity', 'Please enter a valid portion or quantity amount.');
+    if (isNaN(qty) || qty <= 0 || qty > 10000) {
+      Alert.alert('Invalid Quantity', 'Enter a quantity between 1 and 10,000.');
+      return;
+    }
+    if (profile?.approvalStatus !== 'APPROVED' || profile?.latitude === null || profile?.longitude === null) {
+      Alert.alert(
+        'Profile Incomplete',
+        'Your restaurant must be approved and have valid GPS coordinates before posting food.'
+      );
       return;
     }
 
     setLoading(true);
     try {
-      await api.createRestaurantListing({
+      const payload = {
         foodName: foodName.trim(),
         category: selectedCat.id,
         itemType: selectedCat.type,
@@ -91,10 +119,15 @@ export default function CreateListingModal({ visible, onClose, onSuccess }) {
           : selectedCat.id === 'Bakery'
           ? 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=800&auto=format&fit=crop&q=80'
           : 'https://images.unsplash.com/photo-1610348725531-843dff563e2c?w=800&auto=format&fit=crop&q=80',
-      });
+      };
 
-      Alert.alert('Posted to Live Feed!', 'Surplus item has been broadcast to nearby NGOs in real time.');
-      setFoodName('');
+      if (listing) {
+        await api.updateRestaurantListing(listing.id, payload);
+        Alert.alert('Listing Updated', 'The surplus item has been updated in the live feed.');
+      } else {
+        await api.createRestaurantListing(payload);
+        Alert.alert('Posted to Live Feed!', 'Surplus item has been broadcast to nearby NGOs in real time.');
+      }
       onSuccess?.();
       onClose();
     } catch (err) {
@@ -116,8 +149,8 @@ export default function CreateListingModal({ visible, onClose, onSuccess }) {
               {/* Header */}
               <View style={styles.header}>
                 <View>
-                  <Text style={styles.headerTitle}>Post Surplus Food</Text>
-                  <Text style={styles.headerSub}>Broadcast instantly to local verified NGOs</Text>
+                  <Text style={styles.headerTitle}>{listing ? 'Edit Surplus Listing' : 'Post Surplus Food'}</Text>
+                  <Text style={styles.headerSub}>{listing ? 'Update availability, shelf life, or handling details' : 'Broadcast instantly to local verified NGOs'}</Text>
                 </View>
                 <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
                   <MaterialCommunityIcons name="close" size={22} color="#6b7280" />
@@ -253,8 +286,8 @@ export default function CreateListingModal({ visible, onClose, onSuccess }) {
                     <ActivityIndicator color="#ffffff" />
                   ) : (
                     <View style={styles.submitRow}>
-                      <MaterialCommunityIcons name="broadcast" size={20} color="#ffffff" />
-                      <Text style={styles.submitText}>Broadcast to Live Feed</Text>
+                      <MaterialCommunityIcons name={listing ? 'content-save' : 'broadcast'} size={20} color="#ffffff" />
+                      <Text style={styles.submitText}>{listing ? 'Save Changes' : 'Broadcast to Live Feed'}</Text>
                     </View>
                   )}
                 </TouchableOpacity>
@@ -355,6 +388,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     fontSize: 14,
     color: '#111827',
+    letterSpacing: 0,
     marginBottom: 14,
   },
   row: {

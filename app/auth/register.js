@@ -13,7 +13,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { api, setAuthToken } from '../../src/api/client';
+import * as Location from 'expo-location';
+import { api } from '../../src/api/client';
+import LocationMapPicker from '../../src/components/LocationMapPicker';
 
 const ROLE_OPTIONS = [
   {
@@ -40,8 +42,9 @@ export default function RegisterScreen() {
   const [fssaiNumber, setFssaiNumber] = useState('');
   const [darpanId, setDarpanId] = useState('');
   const [address, setAddress] = useState('');
-  const [locationCoords, setLocationCoords] = useState({ latitude: 12.9352, longitude: 77.6245 });
+  const [locationCoords, setLocationCoords] = useState({ latitude: null, longitude: null });
   const [locating, setLocating] = useState(false);
+  const [mapPickerVisible, setMapPickerVisible] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -49,13 +52,43 @@ export default function RegisterScreen() {
   const handleDetectLocation = async () => {
     setLocating(true);
     try {
-      // Set typical metropolitan default coordinates if permission is skipped
-      setLocationCoords({ latitude: 12.9352, longitude: 77.6245 });
-      if (!address.trim()) {
-        setAddress('Koramangala 5th Block, Bengaluru');
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setError('Location permission is required to complete onboarding.');
+        return;
       }
-    } catch (e) {
-      console.warn('Location detection:', e.message);
+      const currentLocation = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const latitude = Number(currentLocation.coords.latitude.toFixed(6));
+      const longitude = Number(currentLocation.coords.longitude.toFixed(6));
+      setLocationCoords({ latitude, longitude });
+      const places = await Location.reverseGeocodeAsync({ latitude, longitude }).catch(() => []);
+      const place = places[0];
+      setAddress(place ? [place.name, place.street, place.district, place.city].filter(Boolean).join(', ') : 'Current GPS location');
+    } catch {
+      setError('Could not detect your location. Select a location manually or try again.');
+    } finally {
+      setLocating(false);
+    }
+  };
+
+  const handleSearchAddress = async () => {
+    if (!address.trim()) {
+      setError('Enter an address to search for a map location.');
+      return;
+    }
+    setLocating(true);
+    try {
+      const results = await Location.geocodeAsync(address.trim());
+      if (!results.length) {
+        setError('No matching location found. Try a nearby street or landmark.');
+        return;
+      }
+      setLocationCoords({ latitude: Number(results[0].latitude.toFixed(6)), longitude: Number(results[0].longitude.toFixed(6)) });
+      setError(null);
+    } catch {
+      setError('Could not find that address. Check it and try again.');
     } finally {
       setLocating(false);
     }
@@ -64,6 +97,10 @@ export default function RegisterScreen() {
   const handleRegister = async () => {
     if (!name.trim() || !email.trim() || !phone.trim() || !password) {
       setError('Please fill in your name, email, phone number, and password.');
+      return;
+    }
+    if (!address.trim() || !Number.isFinite(locationCoords.latitude) || !Number.isFinite(locationCoords.longitude)) {
+      setError('Choose or detect a Google Maps location before continuing.');
       return;
     }
     if (selectedRole === 'RESTAURANT' && !fssaiNumber.trim()) {
@@ -102,10 +139,15 @@ export default function RegisterScreen() {
         latitude: locationCoords.latitude,
         longitude: locationCoords.longitude,
       });
-      if (data.accessToken) {
-        setAuthToken(data.accessToken);
+      if (data.requiresEmailVerification) {
+        router.replace({
+          pathname: '/auth/verify-email',
+          params: {
+            challengeId: data.challengeId,
+            destination: data.destination,
+          },
+        });
       }
-      router.replace('/discover');
     } catch (err) {
       setError(err.message || 'Registration failed. Please try again.');
     } finally {
@@ -257,9 +299,24 @@ export default function RegisterScreen() {
                 placeholder="Street Address / Operating Base"
                 placeholderTextColor="#9ca3af"
                 value={address}
-                onChangeText={setAddress}
+                onChangeText={(value) => { setAddress(value); setLocationCoords({ latitude: null, longitude: null }); }}
+                letterSpacing={0}
               />
             </View>
+
+            <TouchableOpacity
+              style={styles.gpsBtn}
+              onPress={handleSearchAddress}
+              activeOpacity={0.8}
+            >
+              <MaterialCommunityIcons name="map-search-outline" size={16} color="#059669" />
+              <Text style={styles.gpsBtnText}>Search this address</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.gpsBtn} onPress={() => setMapPickerVisible(true)} activeOpacity={0.8}>
+              <MaterialCommunityIcons name="map-marker-radius-outline" size={16} color="#059669" />
+              <Text style={styles.gpsBtnText}>Choose location on map</Text>
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.gpsBtn}
@@ -268,7 +325,11 @@ export default function RegisterScreen() {
             >
               <MaterialCommunityIcons name="crosshairs-gps" size={16} color="#059669" />
               <Text style={styles.gpsBtnText}>
-                {locating ? 'Detecting GPS...' : `GPS Lat/Long: ${locationCoords.latitude.toFixed(4)}, ${locationCoords.longitude.toFixed(4)}`}
+                {locating
+                  ? 'Detecting GPS...'
+                  : locationCoords.latitude === null || locationCoords.longitude === null
+                    ? 'Detect GPS location to continue'
+                    : `GPS Lat/Long: ${locationCoords.latitude.toFixed(4)}, ${locationCoords.longitude.toFixed(4)}`}
               </Text>
             </TouchableOpacity>
 
@@ -326,6 +387,17 @@ export default function RegisterScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+      <LocationMapPicker
+        visible={mapPickerVisible}
+        initialPoint={Number.isFinite(locationCoords.latitude) && Number.isFinite(locationCoords.longitude) ? locationCoords : undefined}
+        initialAddress={address}
+        onClose={() => setMapPickerVisible(false)}
+        onConfirm={({ latitude, longitude, address: selectedAddress }) => {
+          setLocationCoords({ latitude, longitude });
+          setAddress(selectedAddress || `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
+          setError(null);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -430,6 +502,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     fontSize: 15,
     color: '#111827',
+    letterSpacing: 0,
   },
   eyeButton: {
     padding: 4,

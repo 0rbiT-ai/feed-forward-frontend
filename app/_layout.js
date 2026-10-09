@@ -1,20 +1,38 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { ActivityIndicator, Platform, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Redirect, Stack, useSegments } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { loadAuthToken, subscribeAuthToken } from '../src/api/client';
-import { AuthProvider, useAuth } from '../src/context/AuthContext';
+import * as Notifications from 'expo-notifications';
+import { loadAuthToken, subscribeAuthToken, api, getAuthToken } from '../src/api/client';
+import { AuthProvider } from '../src/context/AuthContext';
 
 function RootNavigation() {
   const segments = useSegments();
   const [authReady, setAuthReady] = useState(false);
   const [hasToken, setHasToken] = useState(false);
 
+  const registerPushToken = async () => {
+    try {
+      const { status } = await Notifications.requestPermissionsAsync();
+      if (status !== 'granted') return;
+      const token = (await Notifications.getExpoPushTokenAsync()).data;
+      if (token) await api.registerDeviceToken(token);
+    } catch (error) {
+      console.warn('Push token registration skipped:', error.message);
+    }
+  };
+
   useEffect(() => {
     const unsubscribe = subscribeAuthToken(setHasToken);
     loadAuthToken()
-      .then((token) => setHasToken(Boolean(token)))
+      .then((token) => {
+        // Another startup request may have already rejected and cleared an
+        // expired token while this storage read was still resolving.
+        const activeToken = token && getAuthToken() === token;
+        setHasToken(Boolean(activeToken));
+        if (activeToken && Platform.OS !== 'web') registerPushToken();
+      })
       .finally(() => setAuthReady(true));
     return unsubscribe;
   }, []);

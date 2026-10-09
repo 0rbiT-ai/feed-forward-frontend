@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -20,20 +20,42 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import io from 'socket.io-client';
-import { api } from '../../../src/api/client';
+import { api, getAuthToken } from '../../../src/api/client';
 import { useAuth } from '../../../src/context/AuthContext';
 import SwiggyHeader from '../../../src/components/SwiggyHeader';
 import CreateListingModal from '../../../src/components/CreateListingModal';
 import VerifyOtpModal from '../../../src/components/VerifyOtpModal';
 import NgoOtpModal from '../../../src/components/NgoOtpModal';
 import CancelReservationModal from '../../../src/components/CancelReservationModal';
+import SuccessModal from '../../../src/components/SuccessModal';
+
+const getRestaurantListingCategory = (item) => {
+  const category = String(item.category || '').trim().toLowerCase();
+  if (category.includes('bakery') || category.includes('bread')) return 'Bakery';
+  if (category.includes('raw') || category.includes('grain') || category.includes('ingredient')) return 'Raw Ingredients';
+  if (category.includes('produce') || category.includes('fruit') || category.includes('vegetable')) return 'Fresh Produce';
+  if (category.includes('cook') || category.includes('meal')) return 'Cooked Food';
+
+  return ({
+    BAKERY: 'Bakery',
+    RAW_INGREDIENT: 'Raw Ingredients',
+    PRODUCE: 'Fresh Produce',
+    COOKED_MEAL: 'Cooked Food',
+    PACKAGED: 'Packaged',
+  })[item.itemType] || 'Cooked Food';
+};
 
 export default function DiscoverScreen() {
-  const { role, profile, refreshProfile } = useAuth();
+  const { role, profile, refreshProfile, loading: authLoading } = useAuth();
   const isRestaurant = role === 'RESTAURANT';
 
   // Navigation Segment State
   const [activeSegment, setActiveSegment] = useState('discover');
+  const currentSegment = isRestaurant && activeSegment === 'discover'
+    ? 'restaurant_listings'
+    : !isRestaurant && ['restaurant_listings', 'restaurant_handover'].includes(activeSegment)
+      ? 'discover'
+      : activeSegment;
 
   // NGO Feed & Filter States
   const [listings, setListings] = useState([]);
@@ -44,6 +66,10 @@ export default function DiscoverScreen() {
   const [activeCategory, setActiveCategory] = useState('ALL');
   const [activeRadius, setActiveRadius] = useState(25);
   const [activeSort, setActiveSort] = useState('distance');
+  const [restaurantSort, setRestaurantSort] = useState('available');
+  const [minKarma, setMinKarma] = useState(0);
+  const [itemType, setItemType] = useState('ALL');
+  const [dietaryTag, setDietaryTag] = useState('');
 
   // NGO Reservations State
   const [reservations, setReservations] = useState([]);
@@ -59,45 +85,56 @@ export default function DiscoverScreen() {
   const [donationHistory, setDonationHistory] = useState([]);
   const [restaurantStats, setRestaurantStats] = useState(null);
   const [createModalVisible, setCreateModalVisible] = useState(false);
+  const [editingListing, setEditingListing] = useState(null);
   const [verifyModalReservation, setVerifyModalReservation] = useState(null);
 
   // NGO Claim Modal State
   const [selectedListing, setSelectedListing] = useState(null);
   const [claimModalVisible, setClaimModalVisible] = useState(false);
-  const [portionsToClaim, setPortionsToClaim] = useState(15);
+  const [claimSuccess, setClaimSuccess] = useState(null);
+  const [portionsToClaim, setPortionsToClaim] = useState(0);
   const [shelterDestination, setShelterDestination] = useState('Asha Kiran Community Shelter');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const dataLoaders = useRef({});
 
   // Socket connection
   useEffect(() => {
-    const socketUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5003';
+    const socketUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5000';
     const socket = io(socketUrl, {
       transports: ['websocket'],
       autoConnect: true,
+      auth: { token: getAuthToken() },
     });
 
     socket.on('new_listing', () => {
-      fetchListings();
-      if (isRestaurant) fetchRestaurantData();
+      dataLoaders.current.fetchListings?.();
+      if (dataLoaders.current.isRestaurant) dataLoaders.current.fetchRestaurantData?.();
     });
 
     socket.on('listing_updated', () => {
-      fetchListings();
-      if (isRestaurant) fetchRestaurantData();
+      dataLoaders.current.fetchListings?.();
+      if (dataLoaders.current.isRestaurant) dataLoaders.current.fetchRestaurantData?.();
     });
 
-    socket.on('pickup_completed', (data) => {
-      fetchListings();
-      fetchReservations();
-      fetchHistory();
-      refreshProfile();
-      if (isRestaurant) fetchRestaurantData();
+    socket.on('pickup_completed', () => {
+      dataLoaders.current.fetchListings?.();
+      dataLoaders.current.fetchReservations?.();
+      dataLoaders.current.fetchHistory?.();
+      dataLoaders.current.refreshProfile?.();
+      if (dataLoaders.current.isRestaurant) dataLoaders.current.fetchRestaurantData?.();
     });
 
     socket.on('reservation_cancelled', () => {
-      fetchListings();
-      fetchReservations();
-      if (isRestaurant) fetchRestaurantData();
+      dataLoaders.current.fetchListings?.();
+      dataLoaders.current.fetchReservations?.();
+      if (dataLoaders.current.isRestaurant) dataLoaders.current.fetchRestaurantData?.();
+    });
+
+    socket.on('reservation_no_show', () => {
+      dataLoaders.current.fetchReservations?.();
+      dataLoaders.current.fetchListings?.();
+      if (dataLoaders.current.isRestaurant) dataLoaders.current.fetchRestaurantData?.();
+      dataLoaders.current.refreshProfile?.();
     });
 
     return () => {
@@ -105,43 +142,61 @@ export default function DiscoverScreen() {
     };
   }, [isRestaurant]);
 
-  // Sync segment with role change
-  useEffect(() => {
-    if (isRestaurant) {
-      if (activeSegment === 'discover') setActiveSegment('restaurant_listings');
-    } else {
-      if (activeSegment === 'restaurant_listings' || activeSegment === 'restaurant_handover') {
-        setActiveSegment('discover');
-      }
-    }
-  }, [isRestaurant]);
-
   useFocusEffect(
     useCallback(() => {
       if (isRestaurant) {
         fetchRestaurantData();
-      } else {
+      } else if (currentSegment === 'discover') {
         fetchListings();
+      } else if (currentSegment === 'reservations') {
         fetchReservations();
+      } else if (currentSegment === 'history') {
         fetchHistory();
       }
       refreshProfile();
-    }, [isRestaurant, activeCategory, isVegOnly, activeRadius, activeSort, searchQuery])
+    }, [
+      isRestaurant,
+      currentSegment,
+      authLoading,
+      profile?.latitude,
+      profile?.longitude,
+      isRestaurant ? null : activeCategory,
+      isRestaurant ? null : isVegOnly,
+      isRestaurant ? null : activeRadius,
+      isRestaurant ? null : activeSort,
+      isRestaurant ? null : searchQuery,
+      isRestaurant ? null : minKarma,
+      isRestaurant ? null : itemType,
+      isRestaurant ? null : dietaryTag,
+    ])
   );
 
   // ------------------------------------------
   // FETCHERS
   // ------------------------------------------
-  const fetchListings = async () => {
+  async function fetchListings() {
+    if (authLoading) return;
+    const latitude = Number(profile?.latitude);
+    const longitude = Number(profile?.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      setListings([]);
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
       const params = {
+        latitude,
+        longitude,
         radius: activeRadius * 1000,
         sort: activeSort,
       };
       if (activeCategory !== 'ALL') params.category = activeCategory;
       if (isVegOnly) params.isVeg = 'true';
       if (searchQuery.trim()) params.search = searchQuery.trim();
+      if (minKarma > 0) params.minKarma = minKarma;
+      if (itemType !== 'ALL') params.itemType = itemType;
+      if (dietaryTag) params.dietaryTag = dietaryTag;
 
       const data = await api.getListings(params);
       setListings(data || []);
@@ -151,27 +206,27 @@ export default function DiscoverScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }
 
-  const fetchReservations = async () => {
+  async function fetchReservations() {
     try {
       const data = await api.getReservations();
       setReservations(data || []);
     } catch (err) {
       console.warn('Error fetching reservations:', err.message);
     }
-  };
+  }
 
-  const fetchHistory = async () => {
+  async function fetchHistory() {
     try {
       const data = await api.getHistory();
       setHistoryItems(data || []);
     } catch (err) {
       console.warn('Error fetching history:', err.message);
     }
-  };
+  }
 
-  const fetchRestaurantData = async () => {
+  async function fetchRestaurantData() {
     try {
       setLoading(true);
       const [list, incoming, hist, stats] = await Promise.all([
@@ -190,6 +245,17 @@ export default function DiscoverScreen() {
       setLoading(false);
       setRefreshing(false);
     }
+  }
+
+  // Socket listeners outlive the render that created them. Keep their data
+  // loaders current so events use the latest NGO coordinates and filters.
+  dataLoaders.current = {
+    fetchListings,
+    fetchReservations,
+    fetchHistory,
+    fetchRestaurantData,
+    refreshProfile,
+    isRestaurant,
   };
 
   const handleRefresh = () => {
@@ -204,6 +270,58 @@ export default function DiscoverScreen() {
     refreshProfile();
   };
 
+  const handleEditListing = (listing) => {
+    setEditingListing(listing);
+  };
+
+  const handleDeleteListing = async (listing) => {
+    Alert.alert(
+      'Delete Listing?',
+      'This removes the listing only if it has no active or completed reservations.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.deleteRestaurantListing(listing.id);
+              Alert.alert('Deleted', 'The surplus listing was removed.');
+              fetchRestaurantData();
+            } catch (err) {
+              Alert.alert('Delete Failed', err.message);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleNoShow = async (reservation) => {
+    Alert.alert(
+      'Process No-Show?',
+      `Mark ${reservation.foodName} as not collected after its pickup deadline?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Process',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.processNoShow(reservation.dbId);
+              Alert.alert('No-Show Processed', 'The pickup was cancelled and the NGO penalty was applied.');
+              fetchReservations();
+              fetchListings();
+              refreshProfile();
+            } catch (err) {
+              Alert.alert('No-Show Failed', err.message);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   // ------------------------------------------
   // NGO CLAIM HANDLERS
   // ------------------------------------------
@@ -213,12 +331,17 @@ export default function DiscoverScreen() {
       return;
     }
     setSelectedListing(listing);
-    setPortionsToClaim(Math.min(15, listing.availableServings));
+    setPortionsToClaim(0);
     setClaimModalVisible(true);
   };
 
   const handleConfirmClaim = async () => {
     if (!selectedListing) return;
+    const maxAvailable = Number(selectedListing.availableServings) || 0;
+    if (!Number.isInteger(portionsToClaim) || portionsToClaim < 1 || portionsToClaim > maxAvailable) {
+      Alert.alert('Check the quantity', `Enter a whole number between 1 and ${maxAvailable}.`);
+      return;
+    }
     setIsSubmitting(true);
     try {
       const res = await api.reserveListing(
@@ -226,22 +349,11 @@ export default function DiscoverScreen() {
         portionsToClaim,
         shelterDestination
       );
+      fetchListings();
+      fetchReservations();
       setClaimModalVisible(false);
-      Alert.alert(
-        'Portions Reserved! 🍲',
-        `Successfully locked ${portionsToClaim} ${selectedListing.quantityUnit || 'servings'} from ${selectedListing.restaurant}.\n\nHandover Code: #${res.reservation?.pickupCode || 'Generated'}. View in your Pickups tab to show to staff.`,
-        [
-          {
-            text: 'View My Pickups',
-            onPress: () => {
-              setActiveSegment('reservations');
-              fetchReservations();
-            },
-          },
-          { text: 'Keep Browsing', onPress: () => fetchListings() },
-        ]
-      );
-    } catch (err) {
+      setClaimSuccess({ message: `Reserved ${portionsToClaim} ${selectedListing.quantityUnit || "servings"} from ${selectedListing.restaurant}. Your handover code is #${res.reservation?.pickupCode || "ready"} and is available in Pickups.` });
+      } catch (err) {
       Alert.alert('Reservation Failed', err.message || 'Could not complete reservation.');
     } finally {
       setIsSubmitting(false);
@@ -296,7 +408,7 @@ export default function DiscoverScreen() {
             <View style={styles.portionsBox}>
               <MaterialCommunityIcons name="scale" size={15} color="#059669" />
               <Text style={styles.portionsText}>
-                <Text style={styles.portionsHighlight}>{item.availableServings}</Text> of {item.totalServings} {item.quantityUnit || 'servings'} available
+                <Text style={styles.portionsHighlight}>{item.availableServings}</Text> {item.quantityUnit || 'servings'} available
               </Text>
             </View>
 
@@ -422,6 +534,9 @@ export default function DiscoverScreen() {
           </Text>
           <Text style={styles.histDateText}>{item.completedAt}</Text>
         </View>
+        <Text style={[styles.historyKarmaDelta, item.karmaDelta >= 0 ? styles.karmaEarned : styles.karmaPenalty]}>
+          {item.karmaDelta > 0 ? '+' : ''}{item.karmaDelta} karma pts · {isCompleted ? 'verified collection' : 'cancellation'}
+        </Text>
 
         {!isCompleted && item.cancellationReason && (
           <View style={styles.reasonBox}>
@@ -436,22 +551,26 @@ export default function DiscoverScreen() {
   // ------------------------------------------
   // RENDER: RESTAURANT SURPLUS LISTINGS
   // ------------------------------------------
-  const renderRestaurantListingCard = ({ item }) => (
+  const renderRestaurantListingCard = ({ item }) => {
+    const isExpired = new Date(item.safeUntil).getTime() <= Date.now();
+    return (
     <View style={styles.restoListingCard}>
-      <View style={styles.cardHeaderRow}>
-        <View>
-          <Text style={styles.foodTitle}>{item.foodName}</Text>
+              <View style={styles.cardHeaderRow}>
+        <View style={{ flex: 1, minWidth: 0, marginRight: 8 }}>
+          <Text style={styles.foodTitle} numberOfLines={2}>{item.foodName}</Text>
           <Text style={styles.restoCat}>{item.category} • {item.quantityUnit || 'servings'}</Text>
         </View>
-        <View style={[styles.statusPill, item.status === 'ACTIVE' ? styles.activePill : styles.reservedPill]}>
-          <Text style={styles.statusPillText}>{item.status}</Text>
+        <View style={[styles.statusPill, isExpired ? styles.reservedPill : item.status === 'ACTIVE' ? styles.activePill : styles.reservedPill]}>
+          <Text style={[styles.statusPillText, (isExpired || item.status !== 'ACTIVE') && { color: '#d97706' }]}>
+            {isExpired ? 'EXPIRED' : item.status === 'PARTIALLY_RESERVED' ? 'PARTIAL' : item.status === 'FULLY_RESERVED' ? 'RESERVED' : item.status}
+          </Text>
         </View>
       </View>
 
       <View style={styles.stockRow}>
         <View style={styles.stockCol}>
           <Text style={styles.stockLabel}>Available</Text>
-          <Text style={styles.stockVal}>{item.availableServings} / {item.totalServings}</Text>
+          <Text style={styles.stockVal}>{item.availableServings} {item.quantityUnit || 'servings'}</Text>
         </View>
         <View style={styles.stockCol}>
           <Text style={styles.stockLabel}>Safe Until</Text>
@@ -462,8 +581,20 @@ export default function DiscoverScreen() {
           <Text style={[styles.stockVal, { color: '#059669' }]}>{item.reservations?.length || 0}</Text>
         </View>
       </View>
+
+      <View style={styles.listingActionsRow}>
+        <TouchableOpacity style={styles.editListingBtn} onPress={() => handleEditListing(item)}>
+          <MaterialCommunityIcons name="pencil" size={16} color="#475569" />
+          <Text style={styles.listingActionText}>Edit</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.deleteListingBtn} onPress={() => handleDeleteListing(item)}>
+          <MaterialCommunityIcons name="trash-can" size={16} color="#dc2626" />
+          <Text style={styles.listingActionText}>Delete</Text>
+        </TouchableOpacity>
+      </View>
     </View>
-  );
+    );
+  };
 
   // ------------------------------------------
   // RENDER: RESTAURANT INCOMING HANDOVER
@@ -495,14 +626,31 @@ export default function DiscoverScreen() {
         <MaterialCommunityIcons name="shield-check" size={18} color="#ffffff" />
         <Text style={styles.verifyBtnText}>Verify In-App OTP & Complete Pickup</Text>
       </TouchableOpacity>
+
+      <TouchableOpacity
+        style={styles.noShowBtn}
+        activeOpacity={0.8}
+        onPress={() => handleNoShow(item)}
+      >
+        <MaterialCommunityIcons name="alert-circle" size={16} color="#b91c1c" />
+        <Text style={styles.noShowText}>Mark as No-Show</Text>
+      </TouchableOpacity>
     </View>
   );
+
+  const visibleRestaurantListings = restaurantListings
+    .filter((item) => activeCategory === 'ALL' || getRestaurantListingCategory(item) === activeCategory)
+    .sort((a, b) => {
+      if (restaurantSort === 'pickups') return (b.reservations?.length || 0) - (a.reservations?.length || 0);
+      if (restaurantSort === 'safeUntil') return new Date(a.safeUntil).getTime() - new Date(b.safeUntil).getTime();
+      return Number(b.availableServings || 0) - Number(a.availableServings || 0);
+    });
 
   return (
     <SafeAreaView style={styles.screenContainer}>
       {/* 1. Swiggy-Style Top Segmented Navigation Header */}
       <SwiggyHeader
-        activeSegment={activeSegment}
+        activeSegment={currentSegment}
         onSelectSegment={setActiveSegment}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
@@ -517,18 +665,25 @@ export default function DiscoverScreen() {
         reservationsCount={reservations.length}
         incomingCount={incomingPickups.length}
         onOpenCreateListing={() => setCreateModalVisible(true)}
+        minKarma={minKarma}
+        onSelectMinKarma={setMinKarma}
+        itemType={itemType}
+        onSelectItemType={setItemType}
+        dietaryTag={dietaryTag}
+        onSelectDietaryTag={setDietaryTag}
+        restaurantSort={restaurantSort}
+        onSelectRestaurantSort={setRestaurantSort}
       />
 
       {/* 2. Main Content Body according to Active Segment */}
       <View style={styles.body}>
         {loading && !refreshing ? (
-          <View style={styles.centered}>
-            <ActivityIndicator size="large" color="#10b981" />
-            <Text style={styles.loadingText}>Fetching live surplus...</Text>
+          <View style={styles.listContent}>
+            {[0, 1, 2].map((key) => <View key={key} style={styles.skeletonCard}><View style={styles.skeletonLineWide} /><View style={styles.skeletonLineShort} /><View style={styles.skeletonBlock} /><View style={styles.skeletonLineWide} /></View>)}
           </View>
         ) : !isRestaurant ? (
           // ==================== NGO SCREENS ====================
-          activeSegment === 'discover' ? (
+          currentSegment === 'discover' ? (
             <FlatList
               data={listings}
               renderItem={renderListingCard}
@@ -546,7 +701,7 @@ export default function DiscoverScreen() {
                 </View>
               }
             />
-          ) : activeSegment === 'reservations' ? (
+          ) : currentSegment === 'reservations' ? (
             <FlatList
               data={reservations}
               renderItem={renderPickupCard}
@@ -564,7 +719,7 @@ export default function DiscoverScreen() {
                 </View>
               }
             />
-          ) : activeSegment === 'history' ? (
+          ) : currentSegment === 'history' ? (
             <FlatList
               data={historyItems}
               renderItem={renderHistoryCard}
@@ -601,16 +756,16 @@ export default function DiscoverScreen() {
                 </View>
               </View>
               <View style={styles.karmaMeterBox}>
-                <Text style={styles.karmaMeterTitle}>Reputation Score: {profile?.karmaScore ?? 100} / 100</Text>
+                <Text style={styles.karmaMeterTitle}>Reputation Score: {profile?.karmaScore ?? 100} pts</Text>
                 <Text style={styles.karmaMeterSub}>High trust standing • Gold Partner</Text>
               </View>
             </View>
           )
         ) : (
           // ==================== RESTAURANT SCREENS ====================
-          activeSegment === 'restaurant_listings' ? (
+          currentSegment === 'restaurant_listings' ? (
             <FlatList
-              data={restaurantListings}
+              data={visibleRestaurantListings}
               renderItem={renderRestaurantListingCard}
               keyExtractor={(item) => String(item.id)}
               contentContainerStyle={styles.listContent}
@@ -619,12 +774,12 @@ export default function DiscoverScreen() {
               ListEmptyComponent={
                 <View style={styles.emptyContainer}>
                   <MaterialCommunityIcons name="storefront-outline" size={48} color="#9ca3af" />
-                  <Text style={styles.emptyTitle}>No Active Listings</Text>
-                  <Text style={styles.emptySub}>Tap "+ Post" above to broadcast cooked meals, bakery, or raw grains.</Text>
+                  <Text style={styles.emptyTitle}>{activeCategory === 'ALL' ? 'No Active Listings' : `No ${activeCategory} Listings`}</Text>
+                  <Text style={styles.emptySub}>{activeCategory === 'ALL' ? 'Tap "+ Post" above to broadcast cooked meals, bakery, or raw grains.' : 'Try another category or post a listing in this category.'}</Text>
                 </View>
               }
             />
-          ) : activeSegment === 'restaurant_handover' ? (
+          ) : currentSegment === 'restaurant_handover' ? (
             <FlatList
               data={incomingPickups}
               renderItem={renderIncomingPickupCard}
@@ -652,6 +807,7 @@ export default function DiscoverScreen() {
                     <Text style={styles.histDetailText}>{item.servingsDonated} {item.quantityUnit || 'servings'}</Text>
                     <Text style={styles.histDateText}>{item.completedAt}</Text>
                   </View>
+                  <Text style={[styles.historyKarmaDelta, styles.karmaEarned]}>+{item.karmaDelta || 10} karma pts · verified handover</Text>
                 </View>
               )}
               keyExtractor={(item, idx) => String(item.id || idx)}
@@ -669,6 +825,8 @@ export default function DiscoverScreen() {
           )
         )}
       </View>
+
+      {isRestaurant && currentSegment === 'restaurant_listings' && <TouchableOpacity accessibilityLabel="Create listing" style={styles.postFab} activeOpacity={0.85} onPress={() => setCreateModalVisible(true)}><MaterialCommunityIcons name="plus" size={28} color="#fff" /></TouchableOpacity>}
 
       {/* 3. NGO Claim Portions Modal */}
       <Modal visible={claimModalVisible} animationType="slide" transparent onRequestClose={() => setClaimModalVisible(false)}>
@@ -697,14 +855,34 @@ export default function DiscoverScreen() {
                     <View style={styles.portionCounterRow}>
                       <TouchableOpacity
                         style={styles.counterBtn}
-                        onPress={() => setPortionsToClaim(Math.max(1, portionsToClaim - 5))}
+                        onPress={() => setPortionsToClaim(Math.max(0, portionsToClaim - 1))}
                       >
                         <MaterialCommunityIcons name="minus" size={20} color="#111827" />
                       </TouchableOpacity>
-                      <Text style={styles.counterVal}>{portionsToClaim}</Text>
+                      <TextInput
+                        style={styles.counterInput}
+                        value={String(portionsToClaim)}
+                        onChangeText={(value) => {
+                          if (value === '') {
+                            setPortionsToClaim(0);
+                            return;
+                          }
+                          if (!/^\d+$/.test(value)) {
+                            setPortionsToClaim(0);
+                            return;
+                          }
+                          const quantity = Number.parseInt(value, 10);
+                          setPortionsToClaim(Math.min(quantity, Number(selectedListing.availableServings) || 0));
+                        }}
+                        onBlur={() => setPortionsToClaim((value) => Math.max(0, Math.min(value, Number(selectedListing.availableServings) || 0)))}
+                        keyboardType="number-pad"
+                        maxLength={6}
+                        selectTextOnFocus
+                        accessibilityLabel="Number of servings to reserve"
+                      />
                       <TouchableOpacity
                         style={styles.counterBtn}
-                        onPress={() => setPortionsToClaim(Math.min(selectedListing.availableServings, portionsToClaim + 5))}
+                        onPress={() => setPortionsToClaim(Math.min(Number(selectedListing.availableServings) || 0, portionsToClaim + 1))}
                       >
                         <MaterialCommunityIcons name="plus" size={20} color="#111827" />
                       </TouchableOpacity>
@@ -730,7 +908,7 @@ export default function DiscoverScreen() {
                       style={styles.confirmClaimBtn}
                       activeOpacity={0.8}
                       onPress={handleConfirmClaim}
-                      disabled={isSubmitting}
+                      disabled={isSubmitting || portionsToClaim < 1 || portionsToClaim > Number(selectedListing.availableServings)}
                     >
                       {isSubmitting ? (
                         <ActivityIndicator color="#ffffff" />
@@ -746,10 +924,14 @@ export default function DiscoverScreen() {
         </TouchableWithoutFeedback>
       </Modal>
 
-      {/* 4. Restaurant Create Listing Modal */}
+      {/* 4. Restaurant Listing Modal */}
       <CreateListingModal
-        visible={createModalVisible}
-        onClose={() => setCreateModalVisible(false)}
+        visible={createModalVisible || Boolean(editingListing)}
+        listing={editingListing}
+        onClose={() => {
+          setCreateModalVisible(false);
+          setEditingListing(null);
+        }}
         onSuccess={fetchRestaurantData}
       />
 
@@ -765,7 +947,12 @@ export default function DiscoverScreen() {
       <NgoOtpModal
         visible={Boolean(selectedOtpReservation)}
         reservation={selectedOtpReservation}
-        onClose={() => setSelectedOtpReservation(null)}
+        onClose={() => {
+          setSelectedOtpReservation(null);
+          fetchListings();
+          fetchReservations();
+          fetchHistory();
+        }}
       />
 
       {/* 7. NGO Cancel Reservation Modal */}
@@ -777,6 +964,16 @@ export default function DiscoverScreen() {
           fetchReservations();
           fetchListings();
         }}
+      />
+      <SuccessModal
+        visible={Boolean(claimSuccess)}
+        title="Reservation confirmed"
+        message={claimSuccess?.message}
+        primaryLabel="View pickups"
+        secondaryLabel="Keep browsing"
+        onPrimary={() => { setClaimSuccess(null); setActiveSegment('reservations'); fetchReservations(); }}
+        onSecondary={() => { setClaimSuccess(null); fetchListings(); }}
+        onClose={() => setClaimSuccess(null)}
       />
     </SafeAreaView>
   );
@@ -807,6 +1004,11 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
     gap: 12,
   },
+  skeletonCard: { backgroundColor: '#fff', borderRadius: 18, borderWidth: 1, borderColor: '#e5e7eb', padding: 18, marginBottom: 14, gap: 12 },
+  skeletonLineWide: { height: 16, width: '74%', borderRadius: 8, backgroundColor: '#e5e7eb' },
+  skeletonLineShort: { height: 12, width: '42%', borderRadius: 7, backgroundColor: '#f1f5f9' },
+  skeletonBlock: { height: 58, width: '100%', borderRadius: 12, backgroundColor: '#f1f5f9' },
+  postFab: { position: 'absolute', right: 22, bottom: 26, width: 60, height: 60, borderRadius: 30, backgroundColor: '#ea580c', alignItems: 'center', justifyContent: 'center', elevation: 8, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } },
   listingCard: {
     backgroundColor: '#ffffff',
     borderRadius: 16,
@@ -1173,6 +1375,9 @@ const styles = StyleSheet.create({
     padding: 6,
     marginTop: 6,
   },
+  historyKarmaDelta: { fontSize: 12, fontWeight: '800', marginTop: 8 },
+  karmaEarned: { color: '#059669' },
+  karmaPenalty: { color: '#dc2626' },
   reasonLabel: {
     fontSize: 10,
     fontWeight: '700',
@@ -1251,6 +1456,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 6,
+    flexShrink: 0,
+    alignSelf: 'flex-start',
+    maxWidth: 96,
   },
   activePill: {
     backgroundColor: '#ecfdf5',
@@ -1262,6 +1470,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800',
     color: '#059669',
+    flexShrink: 1,
   },
   stockRow: {
     flexDirection: 'row',
@@ -1282,6 +1491,39 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#0f172a',
     marginTop: 2,
+  },
+  listingActionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+  },
+  editListingBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#f1f5f9',
+  },
+  deleteListingBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#fef2f2',
+  },
+  listingActionText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#475569',
   },
   // Incoming Pickups
   incomingCard: {
@@ -1341,6 +1583,21 @@ const styles = StyleSheet.create({
   verifyBtnText: {
     color: '#ffffff',
     fontSize: 13,
+    fontWeight: '800',
+  },
+  noShowBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 8,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#fef2f2',
+  },
+  noShowText: {
+    color: '#b91c1c',
+    fontSize: 11,
     fontWeight: '800',
   },
   emptyContainer: {
@@ -1422,12 +1679,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e2e8f0',
   },
-  counterVal: {
+  counterInput: {
     fontSize: 22,
     fontWeight: '800',
     color: '#0f172a',
-    minWidth: 40,
+    width: 78,
     textAlign: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#cbd5e1',
   },
   modalInput: {
     backgroundColor: '#f8fafc',

@@ -34,7 +34,7 @@ export default function LoginScreen() {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.login(email.trim().toLowerCase(), password, channel);
+      const data = await api.login(email.trim().toLowerCase(), password, channel, selectedRole);
       router.push({
         pathname: '/auth/otp-verify',
         params: {
@@ -115,7 +115,7 @@ export default function LoginScreen() {
         <View style={styles.form}>
           <View style={styles.inputWrapper}>
             <MaterialCommunityIcons name="email-outline" size={20} color="#9ca3af" style={styles.inputIcon} />
-            <TextInput
+              <TextInput
               style={styles.input}
               placeholder="Email address"
               placeholderTextColor="#9ca3af"
@@ -124,6 +124,7 @@ export default function LoginScreen() {
               autoCapitalize="none"
               keyboardType="email-address"
               autoComplete="email"
+              letterSpacing={0}
             />
           </View>
 
@@ -137,6 +138,7 @@ export default function LoginScreen() {
               onChangeText={setPassword}
               secureTextEntry={!showPassword}
               autoComplete="current-password"
+              letterSpacing={0}
             />
             <TouchableOpacity
               onPress={() => setShowPassword(!showPassword)}
@@ -319,6 +321,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     fontSize: 15,
     color: '#111827',
+    letterSpacing: 0,
   },
   eyeButton: {
     padding: 4,

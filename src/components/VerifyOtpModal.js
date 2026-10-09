@@ -15,10 +15,12 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { api } from '../api/client';
+import SuccessModal from './SuccessModal';
 
 export default function VerifyOtpModal({ visible, reservation, onClose, onSuccess }) {
   const [pickupCode, setPickupCode] = useState('');
   const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
 
   const handleTextChange = (text) => {
     const cleaned = text.replace(/[^0-9]/g, '').slice(0, 4);
@@ -39,16 +41,9 @@ export default function VerifyOtpModal({ visible, reservation, onClose, onSucces
     setLoading(true);
     try {
       const res = await api.verifyHandoverOtp(reservation?.id, pickupCode.trim());
-      Alert.alert(
-        'Handover Verified! 🎉',
-        `Successfully handed over ${reservation?.reservedServings} ${reservation?.quantityUnit || 'servings'} to ${reservation?.ngoName || 'NGO'}. +10 Karma points added to your restaurant profile!`,
-        [{ text: 'Great!', onPress: () => {
-          setPickupCode('');
-          onSuccess?.();
-          onClose();
-        }}]
-      );
-    } catch (err) {
+      setSuccess(true);
+      onSuccess?.();
+      } catch (err) {
       Alert.alert('Verification Failed', err.message || 'Invalid code. Please re-check with NGO.');
     } finally {
       setLoading(false);
@@ -58,10 +53,12 @@ export default function VerifyOtpModal({ visible, reservation, onClose, onSucces
   const handleModalClose = () => {
     Keyboard.dismiss();
     setPickupCode('');
+    setSuccess(false);
     onClose();
   };
 
   return (
+    <>
     <Modal visible={visible} animationType="fade" transparent onRequestClose={handleModalClose}>
       <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
         <KeyboardAvoidingView
@@ -135,6 +132,16 @@ export default function VerifyOtpModal({ visible, reservation, onClose, onSucces
         </KeyboardAvoidingView>
       </TouchableWithoutFeedback>
     </Modal>
+    <SuccessModal
+      visible={success}
+      title="Handover verified"
+      message={`Successfully handed over ${reservation?.reservedServings} ${reservation?.quantityUnit || 'servings'} to ${reservation?.ngoName || 'the NGO partner'}.`}
+      points={10}
+      primaryLabel="Done"
+      onPrimary={() => { setSuccess(false); setPickupCode(''); onClose(); }}
+      onClose={() => { setSuccess(false); setPickupCode(''); onClose(); }}
+    />
+    </>
   );
 }
 

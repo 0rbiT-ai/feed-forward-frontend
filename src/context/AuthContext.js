@@ -1,6 +1,6 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import * as SecureStore from 'expo-secure-store';
-import { api, setAuthToken, loadAuthToken } from '../api/client';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import * as AuthStorage from '../storage/authStorage';
+import { api, setAuthToken, loadAuthToken, subscribeAuthToken } from '../api/client';
 
 const AuthContext = createContext(null);
 
@@ -10,16 +10,22 @@ export const AuthProvider = ({ children }) => {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    initAuth();
-  }, []);
+  useEffect(() => subscribeAuthToken((hasToken) => {
+    if (!hasToken) {
+      setUser(null);
+      setProfile(null);
+      setRole('NGO');
+      AuthStorage.deleteItemAsync('feedforward_user_role').catch(() => {});
+      AuthStorage.deleteItemAsync('feedforward_user_info').catch(() => {});
+    }
+  }), []);
 
-  const initAuth = async () => {
+  const initAuth = useCallback(async () => {
     try {
       const token = await loadAuthToken();
       if (token) {
-        const savedRole = await SecureStore.getItemAsync('feedforward_user_role');
-        const savedUser = await SecureStore.getItemAsync('feedforward_user_info');
+        const savedRole = await AuthStorage.getItemAsync('feedforward_user_role');
+        const savedUser = await AuthStorage.getItemAsync('feedforward_user_info');
         if (savedRole) setRole(savedRole);
         if (savedUser) setUser(JSON.parse(savedUser));
 
@@ -30,19 +36,25 @@ export const AuthProvider = ({ children }) => {
             setProfile(profileData);
             if (profileData.role) {
               setRole(profileData.role);
-              await SecureStore.setItemAsync('feedforward_user_role', profileData.role);
+              await AuthStorage.setItemAsync('feedforward_user_role', profileData.role);
             }
           }
         } catch (pErr) {
           console.warn('Could not refresh profile on launch:', pErr.message);
         }
       }
-    } catch (e) {
-      console.warn('Auth initialization error:', e);
+    } catch (error) {
+      console.warn('Auth initialization error:', error);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    // Hydrate auth state from persistent storage once when the provider mounts.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    initAuth();
+  }, [initAuth]);
 
   const login = async (email, password, channel = 'email') => {
     const data = await api.login(email, password, channel);
@@ -55,8 +67,8 @@ export const AuthProvider = ({ children }) => {
       setUser(data.user);
       const userRole = data.user.role || 'NGO';
       setRole(userRole);
-      await SecureStore.setItemAsync('feedforward_user_role', userRole);
-      await SecureStore.setItemAsync('feedforward_user_info', JSON.stringify(data.user));
+      await AuthStorage.setItemAsync('feedforward_user_role', userRole);
+      await AuthStorage.setItemAsync('feedforward_user_info', JSON.stringify(data.user));
     }
     await refreshProfile();
     return data;
@@ -68,8 +80,8 @@ export const AuthProvider = ({ children }) => {
       setUser(data.user);
       const userRole = data.user.role || registerData.role || 'NGO';
       setRole(userRole);
-      await SecureStore.setItemAsync('feedforward_user_role', userRole);
-      await SecureStore.setItemAsync('feedforward_user_info', JSON.stringify(data.user));
+      await AuthStorage.setItemAsync('feedforward_user_role', userRole);
+      await AuthStorage.setItemAsync('feedforward_user_info', JSON.stringify(data.user));
     }
     await refreshProfile();
     return data;
@@ -91,19 +103,19 @@ export const AuthProvider = ({ children }) => {
 
   const switchRole = async (newRole) => {
     setRole(newRole);
-    await SecureStore.setItemAsync('feedforward_user_role', newRole);
+    await AuthStorage.setItemAsync('feedforward_user_role', newRole);
   };
 
   const logout = async () => {
     try {
       await api.logout();
-    } catch (e) {}
+    } catch {}
     setAuthToken(null);
     setUser(null);
     setProfile(null);
     setRole('NGO');
-    await SecureStore.deleteItemAsync('feedforward_user_role').catch(() => {});
-    await SecureStore.deleteItemAsync('feedforward_user_info').catch(() => {});
+    await AuthStorage.deleteItemAsync('feedforward_user_role').catch(() => {});
+    await AuthStorage.deleteItemAsync('feedforward_user_info').catch(() => {});
   };
 
   return (

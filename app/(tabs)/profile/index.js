@@ -8,6 +8,7 @@ import {
   TextInput,
   StyleSheet,
   Alert,
+  Platform,
   SafeAreaView,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -19,10 +20,15 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { role, logout } = useAuth();
   const isRestaurant = role === 'RESTAURANT';
+  const isAdmin = role === 'ADMIN';
 
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editMode, setEditMode] = useState(false);
+  const [adminPartners, setAdminPartners] = useState(null);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [karmaHistory, setKarmaHistory] = useState([]);
+  const [leaderboard, setLeaderboard] = useState(null);
 
   // Form edit states
   const [editedName, setEditedName] = useState('');
@@ -33,10 +39,15 @@ export default function ProfileScreen() {
   useFocusEffect(
     React.useCallback(() => {
       fetchProfile();
+      if (!isAdmin) api.getKarmaHistory().then(setKarmaHistory).catch(() => setKarmaHistory([]));
+      if (!isAdmin) api.getLeaderboard().then(setLeaderboard).catch(() => setLeaderboard(null));
+      if (isAdmin) {
+        fetchAdminPartners();
+      }
     }, [role])
   );
 
-  const fetchProfile = async () => {
+  async function fetchProfile() {
     try {
       setLoading(true);
       const data = await api.getProfile();
@@ -48,6 +59,31 @@ export default function ProfileScreen() {
       console.warn('Error loading profile:', err);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function fetchAdminPartners() {
+    if (!isAdmin) return;
+    try {
+      setAdminLoading(true);
+      setAdminPartners(await api.getAdminPartners());
+    } catch (err) {
+      Alert.alert('Review unavailable', err.message);
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  const handleReviewPartner = async (partnerType, partnerId, status) => {
+    try {
+      setAdminLoading(true);
+      await api.reviewPartner(partnerType, partnerId, status);
+      await fetchAdminPartners();
+      Alert.alert('Partner reviewed', `The partner application was ${status.toLowerCase()}.`);
+    } catch (err) {
+      Alert.alert('Review failed', err.message);
+    } finally {
+      setAdminLoading(false);
     }
   };
 
@@ -70,6 +106,19 @@ export default function ProfileScreen() {
   };
 
   const handleLogout = () => {
+    if (Platform.OS === 'web') {
+      const confirmed = typeof window !== 'undefined'
+        ? window.confirm('Are you sure you want to sign out of FeedForward?')
+        : true;
+      if (confirmed) {
+        void (async () => {
+          await logout();
+          router.replace('/auth/welcome');
+        })();
+      }
+      return;
+    }
+
     Alert.alert('Sign out', 'Are you sure you want to sign out of FeedForward?', [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -169,23 +218,19 @@ export default function ProfileScreen() {
           <View style={styles.karmaTopRow}>
             <View>
               <Text style={styles.karmaTitle}>Platform Trust & Karma</Text>
-              <Text style={styles.karmaSub}>Based on on-time pickups and donation reliability</Text>
+              <Text style={styles.karmaSub}>Earned from verified on-time pickups and donations</Text>
             </View>
             <View style={styles.karmaCircle}>
               <Text style={styles.karmaScoreNumber}>{karma}</Text>
-              <Text style={styles.karmaMax}>/ 100</Text>
+              <Text style={styles.karmaMax}>pts</Text>
             </View>
-          </View>
-
-          <View style={styles.meterContainer}>
-            <View style={[styles.meterFill, { width: `${Math.min(100, Math.max(10, karma))}%` }]} />
           </View>
 
           <View style={styles.trustFooterRow}>
             <View style={styles.trustItem}>
               <MaterialCommunityIcons name="check-decagram" size={15} color="#10b981" />
               <Text style={styles.trustItemText}>
-                {karma >= 80 ? 'Gold Partner' : karma >= 50 ? 'Active Member' : 'Warning Zone'}
+                {karma >= 500 ? 'Platinum Partner' : karma >= 250 ? 'Gold Partner' : karma >= 80 ? 'Verified Partner' : 'Rising Partner'}
               </Text>
             </View>
 
@@ -201,6 +246,21 @@ export default function ProfileScreen() {
             </View>
           </View>
         </View>
+
+        {!isAdmin && <View style={styles.karmaHistoryCard}>
+          <View style={styles.karmaHistoryHeader}><MaterialCommunityIcons name="history" size={19} color="#059669" /><Text style={styles.karmaHistoryTitle}>Karma history</Text></View>
+          {karmaHistory.length ? karmaHistory.slice(0, 5).map((entry) => (
+            <View key={entry.id} style={styles.karmaHistoryRow}>
+              <View style={{ flex: 1 }}><Text style={styles.karmaHistoryAction}>{entry.reason || entry.action.replace(/_/g, ' ')}</Text><Text style={styles.karmaHistoryDate}>{entry.createdAt}</Text></View>
+              <Text style={[styles.karmaDelta, entry.pointsDelta >= 0 ? styles.karmaEarned : styles.karmaLost]}>{entry.pointsDelta > 0 ? '+' : ''}{entry.pointsDelta} pts</Text>
+            </View>
+          )) : <Text style={styles.karmaHistoryEmpty}>Verified collections and handovers will appear here.</Text>}
+        </View>}
+
+        {!isAdmin && leaderboard && <View style={styles.karmaHistoryCard}>
+          <View style={styles.karmaHistoryHeader}><MaterialCommunityIcons name="trophy-outline" size={19} color="#d97706" /><Text style={styles.karmaHistoryTitle}>Top karma partners</Text></View>
+          {[...(leaderboard.restaurants || []).slice(0, 3).map((partner) => ({ ...partner, partnerType: 'Restaurant' })), ...(leaderboard.ngos || []).slice(0, 3).map((partner) => ({ ...partner, partnerType: 'NGO' }))].map((partner) => <View key={`${partner.partnerType}-${partner.rank}-${partner.name}`} style={styles.karmaHistoryRow}><View style={{ flex: 1 }}><Text numberOfLines={1} style={styles.karmaHistoryAction}>{partner.rank}. {partner.name}</Text><Text style={styles.karmaHistoryDate}>{partner.partnerType}</Text></View><Text style={styles.karmaDelta}>{partner.karmaScore} pts</Text></View>)}
+        </View>}
 
         {/* Impact Metrics */}
         <View style={styles.sectionHeader}>
@@ -336,6 +396,57 @@ export default function ProfileScreen() {
           )}
         </View>
 
+        {isAdmin && (
+          <>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Partner Approval Queue</Text>
+              <TouchableOpacity onPress={fetchAdminPartners}>
+                <Text style={styles.editText}>Refresh</Text>
+              </TouchableOpacity>
+            </View>
+
+            {adminLoading && !adminPartners ? (
+              <View style={styles.centered}>
+                <ActivityIndicator size="large" color="#10b981" />
+                <Text style={styles.loadingText}>Loading partner applications...</Text>
+              </View>
+            ) : (
+              <View style={styles.adminPanel}>
+                {[
+                  ...(adminPartners?.restaurants || []),
+                  ...(adminPartners?.ngos || []),
+                ].map(partner => (
+                  <View key={`${partner.partnerType}-${partner.id}`} style={styles.partnerCard}>
+                    <View style={styles.partnerHeader}>
+                      <View>
+                        <Text style={styles.partnerType}>{partner.partnerType}</Text>
+                        <Text style={styles.partnerName}>{partner.owner?.name || partner.name}</Text>
+                      </View>
+                      <Text style={[styles.statusBadge, partner.approvalStatus === 'APPROVED' ? styles.approved : partner.approvalStatus === 'PENDING' ? styles.pending : styles.rejected]}>
+                        {partner.approvalStatus}
+                      </Text>
+                    </View>
+                    <Text style={styles.partnerEmail}>{partner.owner?.email}</Text>
+                    <Text style={styles.partnerDocument}>Document: {partner.documentStatus || 'NOT_SUBMITTED'}</Text>
+                    {partner.documentName && <Text style={styles.partnerDocument}>File: {partner.documentName}</Text>}
+                    {partner.approvalReason && <Text style={styles.partnerReason}>Reason: {partner.approvalReason}</Text>}
+                    {partner.approvalStatus === 'PENDING' && (
+                      <View style={styles.adminActions}>
+                        <TouchableOpacity style={styles.approveBtn} onPress={() => handleReviewPartner(partner.partnerType, partner.id, 'APPROVED')}>
+                          <Text style={styles.actionText}>Approve</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.rejectBtn} onPress={() => handleReviewPartner(partner.partnerType, partner.id, 'REJECTED')}>
+                          <Text style={styles.actionText}>Reject</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                ))}
+              </View>
+            )}
+          </>
+        )}
+
         {/* Sign Out Button */}
         <TouchableOpacity
           style={styles.logoutBtn}
@@ -460,6 +571,16 @@ const styles = StyleSheet.create({
     padding: 18,
     marginBottom: 16,
   },
+  karmaHistoryCard: { backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: '#e2e8f0', padding: 16, marginBottom: 16 },
+  karmaHistoryHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  karmaHistoryTitle: { fontSize: 15, fontWeight: '800', color: '#111827' },
+  karmaHistoryRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderTopWidth: 1, borderTopColor: '#f1f5f9', paddingVertical: 10 },
+  karmaHistoryAction: { fontSize: 13, fontWeight: '700', color: '#334155' },
+  karmaHistoryDate: { fontSize: 11, color: '#94a3b8', marginTop: 3 },
+  karmaDelta: { fontSize: 13, fontWeight: '800', color: '#475569' },
+  karmaEarned: { color: '#059669' },
+  karmaLost: { color: '#dc2626' },
+  karmaHistoryEmpty: { fontSize: 12, color: '#64748b', paddingVertical: 8 },
   karmaTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -494,18 +615,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#9ca3af',
     marginLeft: 2,
-  },
-  meterContainer: {
-    height: 8,
-    backgroundColor: '#374151',
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginBottom: 12,
-  },
-  meterFill: {
-    height: '100%',
-    backgroundColor: '#10b981',
-    borderRadius: 4,
   },
   trustFooterRow: {
     flexDirection: 'row',
@@ -641,6 +750,82 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     color: '#ffffff',
+  },
+  adminPanel: {
+    gap: 12,
+  },
+  partnerCard: {
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 14,
+    padding: 16,
+  },
+  partnerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  partnerType: {
+    color: '#059669',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  partnerName: {
+    color: '#111827',
+    fontSize: 16,
+    fontWeight: '800',
+    marginTop: 2,
+  },
+  partnerEmail: {
+    color: '#6b7280',
+    fontSize: 12,
+    marginTop: 8,
+  },
+  partnerDocument: {
+    color: '#4b5563',
+    fontSize: 11,
+    marginTop: 4,
+  },
+  partnerReason: {
+    color: '#6b7280',
+    fontSize: 11,
+    marginTop: 4,
+  },
+  statusBadge: {
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    fontSize: 10,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  approved: { backgroundColor: '#dcfce7', color: '#166534' },
+  pending: { backgroundColor: '#fef3c7', color: '#92400e' },
+  rejected: { backgroundColor: '#fee2e2', color: '#991b1b' },
+  adminActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  approveBtn: {
+    flex: 1,
+    backgroundColor: '#10b981',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  rejectBtn: {
+    flex: 1,
+    backgroundColor: '#ef4444',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  actionText: {
+    color: '#ffffff',
+    fontWeight: '800',
   },
   logoutBtn: {
     flexDirection: 'row',

@@ -1,6 +1,6 @@
-import axios from 'axios';
+import { create as createAxios } from 'axios';
 import { Platform } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
+import * as AuthStorage from '../storage/authStorage';
 
 // Dynamically select base URL depending on host OS / emulator
 const getBaseUrl = () => {
@@ -14,7 +14,7 @@ const getBaseUrl = () => {
   return 'http://localhost:5000';
 };
 
-const apiClient = axios.create({
+const apiClient = createAxios({
   baseURL: getBaseUrl(),
   timeout: 8000,
   headers: {
@@ -25,15 +25,30 @@ const apiClient = axios.create({
 let authToken = null;
 const authTokenListeners = new Set();
 
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    const status = error.response?.status;
+    const message = error.response?.data?.message;
+    const invalidSession = (status === 401 || status === 403) &&
+      /invalid or expired access token|access token missing/i.test(message || '');
+
+    // Some endpoints use 403 for role/permission checks. Only clear the session
+    // when the backend identifies the access token itself as invalid.
+    if (authToken && invalidSession) setAuthToken(null);
+    return Promise.reject(error);
+  },
+);
+
 export const setAuthToken = (token) => {
   authToken = token;
   authTokenListeners.forEach((listener) => listener(Boolean(token)));
   if (token) {
     apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-    SecureStore.setItemAsync('feedforward_access_token', token).catch(() => {});
+    AuthStorage.setItemAsync('feedforward_access_token', token).catch(() => {});
   } else {
     delete apiClient.defaults.headers.common['Authorization'];
-    SecureStore.deleteItemAsync('feedforward_access_token').catch(() => {});
+    AuthStorage.deleteItemAsync('feedforward_access_token').catch(() => {});
   }
 };
 
@@ -43,138 +58,12 @@ export const subscribeAuthToken = (listener) => {
 };
 
 export const loadAuthToken = async () => {
-  const token = await SecureStore.getItemAsync('feedforward_access_token');
+  const token = await AuthStorage.getItemAsync('feedforward_access_token');
   if (token) setAuthToken(token);
   return token;
 };
 
 export const getAuthToken = () => authToken;
-
-// In-memory fallback mock database for instant interactive testing if backend is offline
-const fallbackListings = [
-  {
-    id: 1,
-    restaurant: "Royal Biryani House",
-    foodName: "Chicken Dum Biryani & Mirchi Ka Salan",
-    category: "Cooked Food",
-    totalServings: 45,
-    availableServings: 30,
-    preparedTime: "7:30 PM",
-    safeUntil: "10:30 PM",
-    remainingHoursText: "1h 45m left",
-    isUrgent: true,
-    distance: "1.2 km",
-    area: "Koramangala 5th Block",
-    address: "88, 5th Cross, 60ft Road, Koramangala 5th Block, Bengaluru",
-    contactPhone: "+91 80 4122 9011",
-    isVeg: false,
-    dietary: ["Halal", "Contains Dairy"],
-    storageInstructions: "Hot cooked food. Carry insulated thermal crates.",
-    imageUrl: "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=800&auto=format&fit=crop&q=80",
-  },
-  {
-    id: 2,
-    restaurant: "The Rameshwaram Cafe",
-    foodName: "Ghee Podi Idli & Medu Vada with Sambar",
-    category: "Cooked Food",
-    totalServings: 60,
-    availableServings: 60,
-    preparedTime: "8:00 PM",
-    safeUntil: "11:00 PM",
-    remainingHoursText: "2h 15m left",
-    isUrgent: false,
-    distance: "2.4 km",
-    area: "Indiranagar 100ft Rd",
-    address: "2984, 12th Main Rd, HAL 2nd Stage, Indiranagar, Bengaluru",
-    contactPhone: "+91 80 2520 7744",
-    isVeg: true,
-    dietary: ["Pure Veg", "Jain Friendly"],
-    storageInstructions: "Keep warm. Bring food-grade stainless containers.",
-    imageUrl: "https://images.unsplash.com/photo-1589301760014-d929f3979dbc?w=800&auto=format&fit=crop&q=80",
-  },
-  {
-    id: 3,
-    restaurant: "Sandoitchi Artisanal Bakery",
-    foodName: "Sourdough Boules, Brioche & Baguettes",
-    category: "Bakery",
-    totalServings: 35,
-    availableServings: 25,
-    preparedTime: "5:30 PM",
-    safeUntil: "Tomorrow 12:00 PM",
-    remainingHoursText: "Next day safe",
-    isUrgent: false,
-    distance: "1.8 km",
-    area: "HSR Layout Sector 4",
-    address: "411, 27th Main Rd, Sector 4, HSR Layout, Bengaluru",
-    contactPhone: "+91 80 4390 1120",
-    isVeg: true,
-    dietary: ["Pure Veg", "Contains Gluten"],
-    storageInstructions: "Dry ambient storage. Cardboard or cloth bags suitable.",
-    imageUrl: "https://images.unsplash.com/photo-1509440159596-0249088772ff?w=800&auto=format&fit=crop&q=80",
-  }
-];
-
-let fallbackReservations = [
-  {
-    id: "RES-7104",
-    restaurant: "Olio - The Wood Fired Pizzeria",
-    foodName: "Margherita Sourdough Pizza Boxes",
-    reservedServings: 15,
-    totalBatchServings: 30,
-    safeUntil: "10:15 PM",
-    pickupDeadline: "9:45 PM",
-    pickupCode: "7104",
-    status: "ready_for_pickup",
-    restaurantPhone: "+91 80 4920 1888",
-    address: "Plot 42, 1st Cross, Koramangala 4th Block, Bengaluru",
-    pickupInstructions: "Enter through rear service corridor next to waste sorting dock. Bring thermal bags.",
-    reservedAt: "8:42 PM",
-    isVeg: true,
-  }
-];
-
-let fallbackHistory = [
-  {
-    id: "HIS-6021",
-    restaurant: "Burger King (Koramangala)",
-    foodName: "Veg Whopper Patties & Buns",
-    servingsRescued: 30,
-    completedAt: "Today, 6:15 PM",
-    shelterDelivered: "Asha Kiran Night Shelter, Adugodi",
-    fssaiVerified: true,
-  },
-  {
-    id: "HIS-5992",
-    restaurant: "Chai Point (Indiranagar)",
-    foodName: "Samosas, Banana Cake & Puffs",
-    servingsRescued: 25,
-    completedAt: "Yesterday, 8:30 PM",
-    shelterDelivered: "Sneha Sadan Care Home, Viveknagar",
-    fssaiVerified: true,
-  }
-];
-
-let fallbackProfile = {
-  name: "Robin Hood Army — Bengaluru Core",
-  tagline: "Zero-fund volunteer collective serving surplus food to local communities",
-  darpanId: "KA/2021/0291884",
-  taxExemption: "Section 80G Certified (CIT/BLR/80G/2022-23)",
-  isVerified: true,
-  latitude: 12.9352,
-  longitude: 77.6245,
-  logisticsSetting: {
-    mode: "NGO Representative Self-Pickup",
-    inAppDeliveryNote: "In-App Delivery Fleet Integration coming in Phase 2 roadmap.",
-    defaultRadiusKm: 8,
-    operatingBase: "Koramangala Community Depot, Bengaluru",
-  },
-  impactStats: {
-    totalMealsRescued: 3420,
-    foodWastePreventedKg: 1710,
-    co2eAvoidedTonnes: 4.28,
-    activeRestaurantPartners: 28,
-  }
-};
 
 // API Methods
 export const api = {
@@ -189,29 +78,43 @@ export const api = {
     }
   },
 
-  async login(email, password, channel = 'email') {
+  async login(email, password, channel = 'email', role) {
     try {
-      const res = await apiClient.post('/auth/login', { email, password, channel });
+      const res = await apiClient.post('/auth/login', { email, password, channel, role });
       return res.data;
     } catch (err) {
       if (err.response?.data) throw err.response.data;
-      // Simulated login
-      const demoToken = 'demo_jwt_token_ngo';
-      setAuthToken(demoToken);
-      return { requiresOtp: true, challengeId: `demo-${Date.now()}`, channel, destination: channel === 'phone' ? 'your phone' : email };
+      throw new Error('Could not start login');
     }
   },
 
   async register(data) {
     try {
       const res = await apiClient.post('/auth/register', data);
-      if (res.data?.accessToken) setAuthToken(res.data.accessToken);
       return res.data;
     } catch (err) {
       if (err.response?.data) throw err.response.data;
-      const demoToken = 'demo_jwt_token_ngo';
-      setAuthToken(demoToken);
-      return { user: { ...data, role: 'NGO' }, accessToken: demoToken };
+      throw new Error('Could not create your account');
+    }
+  },
+
+  async verifyEmail(challengeId, otp) {
+    try {
+      const res = await apiClient.post('/auth/verify-email', { challengeId, otp });
+      return res.data;
+    } catch (err) {
+      if (err.response?.data) throw err.response.data;
+      throw new Error('Could not verify your email');
+    }
+  },
+
+  async registerDeviceToken(token) {
+    try {
+      const res = await apiClient.post('/auth/device-token', { token });
+      return res.data;
+    } catch (err) {
+      if (err.response?.data) throw err.response.data;
+      throw new Error('Could not register push notifications');
     }
   },
 
@@ -266,8 +169,7 @@ export const api = {
       if (err.response?.data?.message) {
         throw new Error(err.response.data.message);
       }
-      console.warn('API listings call fallback:', err.message);
-      return [];
+      throw new Error('Could not load food listings');
     }
   },
 
@@ -305,7 +207,8 @@ export const api = {
       const res = await apiClient.get('/api/reservations');
       return res.data;
     } catch (err) {
-      return [];
+      const msg = err.response?.data?.message || err.message || "Failed to load reservations";
+      throw new Error(msg);
     }
   },
 
@@ -326,7 +229,8 @@ export const api = {
       const res = await apiClient.get('/api/history');
       return res.data;
     } catch (err) {
-      return [];
+      const msg = err.response?.data?.message || err.message || "Failed to load history";
+      throw new Error(msg);
     }
   },
 
@@ -337,7 +241,25 @@ export const api = {
       return res.data;
     } catch (err) {
       if (err.response?.data?.message) throw new Error(err.response.data.message);
-      return null;
+      throw new Error('Could not load your profile');
+    }
+  },
+
+  async getKarmaHistory() {
+    try {
+      const res = await apiClient.get('/api/karma/history');
+      return res.data;
+    } catch (err) {
+      throw new Error(err.response?.data?.message || err.message || 'Could not load karma history');
+    }
+  },
+
+  async getLeaderboard() {
+    try {
+      const res = await apiClient.get('/api/leaderboard');
+      return res.data;
+    } catch (err) {
+      throw new Error(err.response?.data?.message || err.message || 'Could not load leaderboard');
     }
   },
 
@@ -348,6 +270,56 @@ export const api = {
     } catch (err) {
       const msg = err.response?.data?.message || err.message || "Failed to update profile";
       throw new Error(msg);
+    }
+  },
+
+  async getAdminPartners() {
+    try {
+      const res = await apiClient.get('/api/admin/partners');
+      return res.data;
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || "Failed to load partner applications";
+      throw new Error(msg);
+    }
+  },
+
+  async reviewPartner(partnerType, partnerId, approvalStatus, reviewReason = '') {
+    try {
+      const res = await apiClient.patch(`/api/admin/partners/${partnerType}/${partnerId}/review`, {
+        approvalStatus,
+        reviewReason
+      });
+      return res.data;
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || "Failed to review partner";
+      throw new Error(msg);
+    }
+  },
+
+  async submitReport(data) {
+    try {
+      const res = await apiClient.post('/api/reports', data);
+      return res.data;
+    } catch (err) {
+      throw new Error(err.response?.data?.message || err.message || "Failed to submit report");
+    }
+  },
+
+  async getAdminReports() {
+    try {
+      const res = await apiClient.get('/api/admin/reports');
+      return res.data;
+    } catch (err) {
+      throw new Error(err.response?.data?.message || err.message || "Failed to load reports");
+    }
+  },
+
+  async reviewReport(reportId, status, resolution = '') {
+    try {
+      const res = await apiClient.patch(`/api/admin/reports/${reportId}/review`, { status, resolution });
+      return res.data;
+    } catch (err) {
+      throw new Error(err.response?.data?.message || err.message || "Failed to review report");
     }
   },
 
@@ -369,13 +341,50 @@ export const api = {
     }
   },
 
+  async requestPickupCode(reservationId) {
+    try {
+      const res = await apiClient.post(`/api/reservations/${reservationId}/request-code`);
+      return res.data;
+    } catch (err) {
+      throw new Error(err.response?.data?.message || err.message || "Failed to request pickup code");
+    }
+  },
+
+  async processNoShow(reservationId) {
+    try {
+      const res = await apiClient.post(`/api/reservations/${reservationId}/no-show`);
+      return res.data;
+    } catch (err) {
+      throw new Error(err.response?.data?.message || err.message || "Failed to process no-show");
+    }
+  },
+
   // Get Restaurant listings
   async getRestaurantListings() {
     try {
       const res = await apiClient.get('/api/restaurant/listings');
       return res.data;
     } catch (err) {
-      return [];
+      const msg = err.response?.data?.message || err.message || "Failed to load restaurant listings";
+      throw new Error(msg);
+    }
+  },
+
+  async updateRestaurantListing(listingId, data) {
+    try {
+      const res = await apiClient.patch(`/api/restaurant/listings/${listingId}`, data);
+      return res.data;
+    } catch (err) {
+      throw new Error(err.response?.data?.message || err.message || "Failed to update listing");
+    }
+  },
+
+  async deleteRestaurantListing(listingId) {
+    try {
+      const res = await apiClient.delete(`/api/restaurant/listings/${listingId}`);
+      return res.data;
+    } catch (err) {
+      throw new Error(err.response?.data?.message || err.message || "Failed to delete listing");
     }
   },
 
@@ -390,24 +399,13 @@ export const api = {
     }
   },
 
-  // Update listing (Restaurant)
-  async updateRestaurantListing(listingId, data) {
-    try {
-      const res = await apiClient.patch(`/api/restaurant/listings/${listingId}`, data);
-      return res.data;
-    } catch (err) {
-      const msg = err.response?.data?.message || err.message || "Failed to update listing";
-      throw new Error(msg);
-    }
-  },
-
   // Get incoming reservations waiting for pickup (Restaurant)
   async getRestaurantReservations() {
     try {
       const res = await apiClient.get('/api/restaurant/reservations');
       return res.data;
     } catch (err) {
-      return [];
+      throw new Error(err.response?.data?.message || err.message || 'Failed to load incoming reservations');
     }
   },
 
@@ -417,7 +415,7 @@ export const api = {
       const res = await apiClient.get('/api/restaurant/history');
       return res.data;
     } catch (err) {
-      return [];
+      throw new Error(err.response?.data?.message || err.message || 'Failed to load donation history');
     }
   },
 
@@ -427,7 +425,7 @@ export const api = {
       const res = await apiClient.get('/api/restaurant/stats');
       return res.data;
     } catch (err) {
-      return null;
+      throw new Error(err.response?.data?.message || err.message || 'Failed to load restaurant statistics');
     }
   },
 };

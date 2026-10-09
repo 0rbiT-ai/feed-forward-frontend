@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,6 @@ import {
   ActivityIndicator,
   StyleSheet,
   Keyboard,
-  TouchableWithoutFeedback,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
@@ -19,32 +18,13 @@ import { api } from '../../src/api/client';
 export default function OtpVerifyScreen() {
   const router = useRouter();
   const { challengeId, channel = 'email', destination = '' } = useLocalSearchParams();
-  const [otp, setOtp] = useState(['', '', '', '', '', '']);
+  const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const inputRefs = useRef([]);
-
-  const handleOtpChange = (text, index) => {
-    const digit = text.replace(/[^0-9]/g, '').slice(-1);
-    const next = [...otp];
-    next[index] = digit;
-    setOtp(next);
-
-    if (digit && index < 5) {
-      inputRefs.current[index + 1]?.focus();
-    } else if (digit && index === 5) {
-      // Finished all 6 digits -> dismiss keyboard automatically on iPhone
-      Keyboard.dismiss();
-    }
-
-    if (!digit && index > 0) {
-      inputRefs.current[index - 1]?.focus();
-    }
-  };
-
+  const [otpFocused, setOtpFocused] = useState(false);
   const handleVerify = async () => {
     Keyboard.dismiss();
-    const code = otp.join('');
+    const code = otp;
     if (code.length !== 6) return setError('Enter the complete 6-digit code.');
     setLoading(true);
     setError(null);
@@ -53,7 +33,7 @@ export default function OtpVerifyScreen() {
       router.replace('/discover');
     } catch (err) {
       setError(err.message || 'Invalid or expired verification code.');
-      setOtp(['', '', '', '', '', '']);
+      setOtp('');
     } finally {
       setLoading(false);
     }
@@ -61,11 +41,10 @@ export default function OtpVerifyScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.keyboardAvoid}
-        >
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.keyboardAvoid}
+      >
           <View style={styles.container}>
             <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
               <MaterialCommunityIcons name="arrow-left" size={22} color="#374151" />
@@ -82,23 +61,36 @@ export default function OtpVerifyScreen() {
               </Text>
             </View>
 
-            <View style={styles.otpRow}>
-              {otp.map((digit, index) => (
-                <TextInput
-                  key={index}
-                  ref={(ref) => (inputRefs.current[index] = ref)}
-                  style={styles.otpBox}
-                  value={digit}
-                  onChangeText={(text) => handleOtpChange(text, index)}
-                  keyboardType="number-pad"
-                  maxLength={1}
-                  selectTextOnFocus
-                  returnKeyType={index === 5 ? "done" : "next"}
-                  onSubmitEditing={() => {
-                    if (index === 5) Keyboard.dismiss();
-                  }}
-                />
-              ))}
+            <View style={styles.otpEntry}>
+              <View pointerEvents="none" style={styles.otpRow}>
+                {Array.from({ length: 6 }, (_, index) => (
+                  <View
+                    key={index}
+                    style={[styles.otpCell, otpFocused && styles.otpCellFocused]}
+                  >
+                    <Text style={styles.otpDigit}>{otp[index] || ''}</Text>
+                  </View>
+                ))}
+              </View>
+              <TextInput
+                style={styles.otpInput}
+                value={otp}
+                selection={{ start: otp.length, end: otp.length }}
+                onChangeText={(text) => {
+                  setOtp(text.replace(/[^0-9]/g, '').slice(0, 6));
+                  setError(null);
+                }}
+                onFocus={() => setOtpFocused(true)}
+                onBlur={() => setOtpFocused(false)}
+                keyboardType="number-pad"
+                inputMode="numeric"
+                maxLength={6}
+                autoComplete="one-time-code"
+                textContentType="oneTimeCode"
+                accessibilityLabel="Six digit sign-in code"
+                returnKeyType="done"
+                onSubmitEditing={handleVerify}
+              />
             </View>
 
             {/* Tap to dismiss keyboard hint for iOS */}
@@ -108,7 +100,7 @@ export default function OtpVerifyScreen() {
               activeOpacity={0.7}
             >
               <MaterialCommunityIcons name="keyboard-close" size={16} color="#9ca3af" />
-              <Text style={styles.dismissHintText}>Tap anywhere to close keyboard</Text>
+              <Text style={styles.dismissHintText}>Tap here to close keyboard</Text>
             </TouchableOpacity>
 
             {error && (
@@ -130,8 +122,7 @@ export default function OtpVerifyScreen() {
               )}
             </TouchableOpacity>
           </View>
-        </KeyboardAvoidingView>
-      </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -146,8 +137,12 @@ const styles = StyleSheet.create({
   title: { fontSize: 25, fontWeight: '800', color: '#111827', marginTop: 16 },
   subtitle: { fontSize: 14, color: '#6b7280', textAlign: 'center', lineHeight: 21, marginTop: 8 },
   highlight: { color: '#059669', fontWeight: '700' },
-  otpRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 },
-  otpBox: { width: 46, height: 56, borderWidth: 1, borderColor: '#d1d5db', borderRadius: 12, textAlign: 'center', fontSize: 22, color: '#111827' },
+  otpEntry: { position: 'relative', marginBottom: 16 },
+  otpRow: { flexDirection: 'row', justifyContent: 'center', gap: 9 },
+  otpCell: { width: 46, height: 56, borderWidth: 1.5, borderColor: '#d1d5db', borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
+  otpCellFocused: { borderColor: '#10b981', backgroundColor: '#f0fdf9' },
+  otpDigit: { fontSize: 23, fontWeight: '700', color: '#111827' },
+  otpInput: { position: 'absolute', top: 0, left: 0, right: 0, height: 56, opacity: 0.01, color: 'transparent', backgroundColor: 'transparent', borderColor: 'transparent', outlineStyle: 'none' },
   dismissHint: {
     flexDirection: 'row',
     alignItems: 'center',

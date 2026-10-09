@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Platform,
+  Modal,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -28,7 +29,16 @@ export default function SwiggyHeader({
   reservationsCount = 0,
   incomingCount = 0,
   onOpenCreateListing,
+  minKarma = 0,
+  onSelectMinKarma,
+  itemType = 'ALL',
+  onSelectItemType,
+  dietaryTag = '',
+  onSelectDietaryTag,
+  restaurantSort = 'available',
+  onSelectRestaurantSort,
 }) {
+  const [filtersVisible, setFiltersVisible] = React.useState(false);
   const router = useRouter();
   const { role, profile } = useAuth();
 
@@ -228,17 +238,6 @@ export default function SwiggyHeader({
               <Text style={styles.serviceCardSub}>History</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.serviceCard, styles.postNewCard]}
-              activeOpacity={0.8}
-              onPress={onOpenCreateListing}
-            >
-              <View style={[styles.cardIconCircle, { backgroundColor: '#ea580c' }]}>
-                <MaterialCommunityIcons name="plus" size={20} color="#ffffff" />
-              </View>
-              <Text style={[styles.serviceCardTitle, { color: '#ea580c' }]}>+ Post</Text>
-              <Text style={styles.serviceCardSub}>Surplus</Text>
-            </TouchableOpacity>
           </>
         )}
       </View>
@@ -246,7 +245,7 @@ export default function SwiggyHeader({
       {/* 3. Swiggy Search Bar + VEG Switch (Shown in Discovery / Listings views) */}
       {(activeSegment === 'discover' || activeSegment === 'restaurant_listings') && (
         <>
-          <View style={styles.searchRow}>
+          {!isRestaurant && activeSegment === 'discover' && <View style={styles.searchRow}>
             <View style={styles.searchBar}>
               <MaterialCommunityIcons name="magnify" size={20} color="#9ca3af" />
               <TextInput
@@ -274,7 +273,7 @@ export default function SwiggyHeader({
                 <View style={[styles.vegIndicatorDot, { backgroundColor: isVegOnly ? '#10b981' : '#d1d5db' }]} />
               </View>
             </TouchableOpacity>
-          </View>
+          </View>}
 
           {/* 4. Swiggy Filter Chips Row with Active Underline Indicator */}
           <ScrollView
@@ -301,38 +300,46 @@ export default function SwiggyHeader({
           </ScrollView>
 
           {/* 5. Radius and Sort Pill Row */}
-          <View style={styles.proximityRow}>
-            <View style={styles.radiusGroup}>
-              <MaterialCommunityIcons name="map-marker-radius-outline" size={15} color="#4b5563" />
-              <Text style={styles.radiusLabel}>Radius:</Text>
-              {radii.map((r) => (
-                <TouchableOpacity
-                  key={r.value}
-                  style={[styles.radiusPill, activeRadius === r.value && styles.activeRadiusPill]}
-                  onPress={() => onSelectRadius(r.value)}
-                >
-                  <Text style={[styles.radiusPillText, activeRadius === r.value && styles.activeRadiusPillText]}>
-                    {r.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+          {isRestaurant ? (
+            <View style={[styles.proximityRow, { justifyContent: 'flex-end' }]}>
+              <TouchableOpacity style={styles.sortPill} onPress={() => setFiltersVisible(true)}>
+                <MaterialCommunityIcons name="sort" size={16} color="#374151" />
+                <Text style={styles.sortPillText}>Sort My Listings</Text>
+              </TouchableOpacity>
             </View>
-
-            {/* Sort Toggle */}
-            <TouchableOpacity
-              style={styles.sortPill}
-              activeOpacity={0.7}
-              onPress={() => {
-                const nextSort = activeSort === 'distance' ? 'expiry' : activeSort === 'expiry' ? 'servings' : 'distance';
-                onSelectSort(nextSort);
-              }}
-            >
-              <MaterialCommunityIcons name="sort" size={14} color="#374151" />
-              <Text style={styles.sortPillText}>
-                {activeSort === 'distance' ? 'Nearest' : activeSort === 'expiry' ? 'Expiring Soon' : 'Most Portions'}
-              </Text>
-            </TouchableOpacity>
-          </View>
+          ) : (
+            <View style={styles.proximityRow}>
+              <Text style={styles.sortPillText}>Within {activeRadius >= 100 ? 'any distance' : `${activeRadius} km`}</Text>
+              <TouchableOpacity style={styles.sortPill} onPress={() => setFiltersVisible(true)}>
+                <MaterialCommunityIcons name="tune-variant" size={16} color="#374151" />
+                <Text style={styles.sortPillText}>Filters & Sort</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          <Modal visible={filtersVisible} transparent animationType="slide" onRequestClose={() => setFiltersVisible(false)}>
+            <View style={styles.filterOverlay}><View style={styles.filterSheet}>
+              <View style={styles.filterHeader}><Text style={styles.filterTitle}>{isRestaurant ? 'Sort My Listings' : 'Filters & Sort'}</Text><TouchableOpacity onPress={() => setFiltersVisible(false)}><MaterialCommunityIcons name="close" size={22} color="#374151" /></TouchableOpacity></View>
+              {isRestaurant ? (
+                <>
+                  <Text style={styles.filterLabel}>Sort listings by</Text>
+                  {[
+                    ['available', 'Most portions available'],
+                    ['pickups', 'Most incoming pickups'],
+                    ['safeUntil', 'Safe until soonest'],
+                  ].map(([value, label]) => <TouchableOpacity key={value} style={styles.filterRow} onPress={() => onSelectRestaurantSort(value)}><Text style={styles.filterOptionText}>{label}</Text>{restaurantSort === value && <MaterialCommunityIcons name="check-circle" size={20} color="#10b981" />}</TouchableOpacity>)}
+                </>
+              ) : (
+                <>
+                  <Text style={styles.filterLabel}>Food type</Text><View style={styles.filterOptions}>{[['ALL', 'Any'], ['COOKED_MEAL', 'Cooked meals'], ['RAW_INGREDIENT', 'Raw ingredients'], ['BAKERY', 'Bakery'], ['PRODUCE', 'Produce'], ['PACKAGED', 'Packaged']].map(([value, label]) => <TouchableOpacity key={value} style={[styles.filterOption, itemType === value && styles.filterSelected]} onPress={() => onSelectItemType(value)}><Text style={[styles.filterOptionText, itemType === value && styles.filterSelectedText]}>{label}</Text></TouchableOpacity>)}</View>
+                  <Text style={styles.filterLabel}>Dietary</Text><View style={styles.filterOptions}>{[['', 'Any'], ['Pure Veg', 'Pure veg'], ['Halal', 'Halal'], ['Contains Dairy', 'Dairy'], ['Vegan', 'Vegan']].map(([value, label]) => <TouchableOpacity key={value || 'any'} style={[styles.filterOption, dietaryTag === value && styles.filterSelected]} onPress={() => onSelectDietaryTag(value)}><Text style={[styles.filterOptionText, dietaryTag === value && styles.filterSelectedText]}>{label}</Text></TouchableOpacity>)}</View>
+                  <Text style={styles.filterLabel}>Search radius</Text><View style={styles.filterOptions}>{radii.map(r => <TouchableOpacity key={r.value} style={[styles.filterOption, activeRadius === r.value && styles.filterSelected]} onPress={() => onSelectRadius(r.value)}><Text style={[styles.filterOptionText, activeRadius === r.value && styles.filterSelectedText]}>{r.label}</Text></TouchableOpacity>)}</View>
+                  <Text style={styles.filterLabel}>Sort listings</Text>{[['distance', 'Nearest first'], ['expiry', 'Expiring soon'], ['servings', 'Most portions'], ['newest', 'Recently added']].map(([value, label]) => <TouchableOpacity key={value} style={styles.filterRow} onPress={() => onSelectSort(value)}><Text style={styles.filterOptionText}>{label}</Text>{activeSort === value && <MaterialCommunityIcons name="check-circle" size={20} color="#10b981" />}</TouchableOpacity>)}
+                  <Text style={styles.filterLabel}>Minimum restaurant karma</Text><View style={styles.filterOptions}>{[0, 100, 250, 500].map(value => <TouchableOpacity key={value} style={[styles.filterOption, minKarma === value && styles.filterSelected]} onPress={() => onSelectMinKarma(value)}><Text style={[styles.filterOptionText, minKarma === value && styles.filterSelectedText]}>{value ? `${value}+` : 'Any'}</Text></TouchableOpacity>)}</View>
+                </>
+              )}
+              <TouchableOpacity style={styles.filterDone} onPress={() => setFiltersVisible(false)}><Text style={styles.filterDoneText}>Show results</Text></TouchableOpacity>
+            </View></View>
+          </Modal>
         </>
       )}
     </View>
@@ -484,6 +491,8 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     color: '#111827',
+    minWidth: 0,
+    letterSpacing: 0,
   },
   vegSwitch: {
     flexDirection: 'row',
@@ -555,6 +564,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingTop: 6,
   },
+  filterOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(15,23,42,0.45)' },
+  filterSheet: { backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 22, paddingBottom: 32 },
+  filterHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  filterTitle: { fontSize: 20, fontWeight: '800', color: '#111827' },
+  filterLabel: { fontSize: 13, fontWeight: '700', color: '#6b7280', marginTop: 12, marginBottom: 10 },
+  filterOptions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  filterOption: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, backgroundColor: '#f3f4f6' },
+  filterSelected: { backgroundColor: '#d1fae5' },
+  filterOptionText: { fontSize: 14, fontWeight: '600', color: '#374151' },
+  filterSelectedText: { color: '#047857' },
+  filterRow: { minHeight: 42, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
+  filterDone: { backgroundColor: '#10b981', borderRadius: 12, minHeight: 48, justifyContent: 'center', alignItems: 'center', marginTop: 22 },
+  filterDoneText: { color: '#fff', fontWeight: '800', fontSize: 15 },
   radiusGroup: {
     flexDirection: 'row',
     alignItems: 'center',
