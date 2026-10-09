@@ -3,6 +3,7 @@ import {
   Modal,
   View,
   Text,
+  Image,
   TextInput,
   TouchableOpacity,
   ScrollView,
@@ -15,6 +16,7 @@ import {
   TouchableWithoutFeedback,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
@@ -44,7 +46,30 @@ export default function CreateListingModal({ visible, onClose, onSuccess, listin
   const [isVeg, setIsVeg] = useState(true);
   const [storageNotes, setStorageNotes] = useState('');
   const [loading, setLoading] = useState(false);
+  const [imageUrl, setImageUrl] = useState(null);
+  const [imagePreviewUri, setImagePreviewUri] = useState(null);
+  const [selectedImageAsset, setSelectedImageAsset] = useState(null);
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageUploadError, setImageUploadError] = useState('');
+  const [imageSourceChooserVisible, setImageSourceChooserVisible] = useState(false);
 
+  const handleSelectCategory = (cat) => {
+    setSelectedCat(cat);
+    setUnit(cat.defaultUnit);
+    setStorageNotes('');
+    if (cat.id === 'Raw Ingredients') {
+      setSafeHours(168); // 7 days
+    } else if (cat.id === 'Cooked Food') {
+      setSafeHours(3);
+    } else if (cat.id === 'Bakery') {
+      setSafeHours(18);
+    } else {
+      setSafeHours(48);
+    }
+  };
+
+  // Rehydrate this modal's form whenever it opens or the edited listing changes.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!visible) return;
     if (listing) {
@@ -56,29 +81,57 @@ export default function CreateListingModal({ visible, onClose, onSuccess, listin
       setSafeHours(Math.max(1, Math.round((new Date(listing.safeUntil) - Date.now()) / 3600000)));
       setIsVeg(Boolean(listing.isVeg));
       setStorageNotes(listing.storageInstructions || '');
+      setImageUrl(listing.imageUrl || null);
+      setImagePreviewUri(listing.imageUrl || null);
+      setSelectedImageAsset(null);
     } else {
       handleSelectCategory(CATEGORIES[0]);
       setFoodName('');
       setQuantity('30');
       setStorageNotes('');
+      setImageUrl(null);
+      setImagePreviewUri(null);
+      setSelectedImageAsset(null);
     }
+    setImageUploadError('');
+    setImageSourceChooserVisible(false);
   }, [listing, visible]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
-  const handleSelectCategory = (cat) => {
-    setSelectedCat(cat);
-    setUnit(cat.defaultUnit);
-    if (cat.id === 'Raw Ingredients') {
-      setSafeHours(168); // 7 days
-      setStorageNotes('Dry ambient storage. Keep away from moisture.');
-    } else if (cat.id === 'Cooked Food') {
-      setSafeHours(3);
-      setStorageNotes('Hot cooked food. Carry insulated thermal crates.');
-    } else if (cat.id === 'Bakery') {
-      setSafeHours(18);
-      setStorageNotes('Ambient dry storage. Cardboard crates suitable.');
-    } else {
-      setSafeHours(48);
-      setStorageNotes('Cool ambient or ventilated crates.');
+  const selectImageAsset = async (source) => {
+    setImageUploadError('');
+    setImageUploading(true);
+    try {
+      let result;
+      if (source === 'camera') {
+        if (Platform.OS !== 'web') {
+          const permission = await ImagePicker.requestCameraPermissionsAsync();
+          if (!permission.granted) throw new Error('Allow camera access to take an item photo.');
+        }
+        result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ['images'],
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.8,
+        });
+      } else {
+        result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 0.8,
+        });
+      }
+
+      if (result.canceled || !result.assets?.[0]) return;
+      const asset = result.assets[0];
+      setImagePreviewUri(asset.uri);
+      setSelectedImageAsset(asset);
+      setImageUrl(null);
+    } catch (error) {
+      setImageUploadError(error.message || 'Could not select the photo. Try again.');
+    } finally {
+      setImageUploading(false);
     }
   };
 
@@ -92,6 +145,11 @@ export default function CreateListingModal({ visible, onClose, onSuccess, listin
       Alert.alert('Invalid Quantity', 'Enter a quantity between 1 and 10,000.');
       return;
     }
+    const customSafeHours = Number(safeHours);
+    if (!Number.isInteger(customSafeHours) || customSafeHours < 1 || customSafeHours > 168) {
+      Alert.alert('Invalid Safe Until', 'Enter a whole number of hours between 1 and 168.');
+      return;
+    }
     if (profile?.approvalStatus !== 'APPROVED' || profile?.latitude === null || profile?.longitude === null) {
       Alert.alert(
         'Profile Incomplete',
@@ -99,26 +157,62 @@ export default function CreateListingModal({ visible, onClose, onSuccess, listin
       );
       return;
     }
+    if (imageUploading) return;
+    if (!imageUrl && !selectedImageAsset) {
+      setImageUploadError(imagePreviewUri
+        ? 'Choose the photo again before posting this listing.'
+        : 'Add an item photo before posting this listing.');
+      return;
+    }
 
     setLoading(true);
+    let uploadedPhoto = null;
     try {
+      let submittedImageUrl = imageUrl;
+      if (selectedImageAsset) {
+        setImageUploadError('');
+        setImageUploading(true);
+        const signedUpload = await api.getCloudinaryUploadSignature();
+        const formData = new FormData();
+        if (Platform.OS === 'web') {
+          const file = selectedImageAsset.file || await fetch(selectedImageAsset.uri).then((response) => response.blob());
+          formData.append('file', file, selectedImageAsset.fileName || 'listing-photo.jpg');
+        } else {
+          formData.append('file', {
+            uri: selectedImageAsset.uri,
+            type: selectedImageAsset.mimeType || 'image/jpeg',
+            name: selectedImageAsset.fileName || 'listing-photo.jpg',
+          });
+        }
+        formData.append('api_key', signedUpload.apiKey);
+        formData.append('timestamp', String(signedUpload.timestamp));
+        formData.append('folder', signedUpload.folder);
+        formData.append('public_id', signedUpload.publicId);
+        formData.append('signature', signedUpload.signature);
+
+        const uploadResponse = await fetch(
+          `https://api.cloudinary.com/v1_1/${encodeURIComponent(signedUpload.cloudName)}/image/upload`,
+          { method: 'POST', body: formData },
+        );
+        const uploadResult = await uploadResponse.json();
+        if (!uploadResponse.ok || !uploadResult.secure_url || !uploadResult.public_id) {
+          throw new Error(uploadResult.error?.message || 'Cloudinary could not upload this photo.');
+        }
+        uploadedPhoto = { url: uploadResult.secure_url, publicId: uploadResult.public_id };
+        submittedImageUrl = uploadResult.secure_url;
+      }
+
       const payload = {
         foodName: foodName.trim(),
         category: selectedCat.id,
         itemType: selectedCat.type,
         quantityUnit: unit,
         totalServings: qty,
-        safeUntilHours: safeHours,
+        safeUntilHours: customSafeHours,
         isVeg,
         dietary: isVeg ? ['Pure Veg'] : ['Non-Veg'],
-        storageInstructions: storageNotes.trim() || 'Carry clean food containers.',
-        imageUrl: selectedCat.id === 'Cooked Food'
-          ? 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=800&auto=format&fit=crop&q=80'
-          : selectedCat.id === 'Raw Ingredients'
-          ? 'https://images.unsplash.com/photo-1586201375761-83865001e31c?w=800&auto=format&fit=crop&q=80'
-          : selectedCat.id === 'Bakery'
-          ? 'https://images.unsplash.com/photo-1509440159596-0249088772ff?w=800&auto=format&fit=crop&q=80'
-          : 'https://images.unsplash.com/photo-1610348725531-843dff563e2c?w=800&auto=format&fit=crop&q=80',
+        storageInstructions: storageNotes.trim() || null,
+        imageUrl: submittedImageUrl,
       };
 
       if (listing) {
@@ -131,8 +225,20 @@ export default function CreateListingModal({ visible, onClose, onSuccess, listin
       onSuccess?.();
       onClose();
     } catch (err) {
+      if (uploadedPhoto?.publicId) {
+        try {
+          await api.deleteCloudinaryUpload(uploadedPhoto.publicId);
+        } catch (cleanupError) {
+          console.warn('Could not clean up an image after its listing failed to save:', cleanupError.message);
+        }
+        setImageUrl(null);
+      }
+      if (selectedImageAsset) {
+        setImageUploadError(err.message || 'Could not save the photo. Try again.');
+      }
       Alert.alert('Error', err.message || 'Could not post listing.');
     } finally {
+      setImageUploading(false);
       setLoading(false);
     }
   };
@@ -199,6 +305,38 @@ export default function CreateListingModal({ visible, onClose, onSuccess, listin
                   onSubmitEditing={Keyboard.dismiss}
                 />
 
+                <Text style={styles.fieldLabel}>Item Photo <Text style={styles.requiredMark}>*</Text></Text>
+                <View style={styles.photoPickerRow}>
+                  <TouchableOpacity
+                    style={[styles.photoPickerSquare, imagePreviewUri && styles.photoPickerSquareFilled]}
+                    onPress={() => setImageSourceChooserVisible(true)}
+                    disabled={imageUploading}
+                    activeOpacity={0.8}
+                    accessibilityRole="button"
+                    accessibilityLabel={imagePreviewUri ? 'Change item photo' : 'Add required item photo'}
+                  >
+                    {imagePreviewUri ? (
+                      <>
+                        <Image source={{ uri: imagePreviewUri }} style={styles.photoPreview} />
+                        <View style={styles.photoCameraBadge}>
+                          <MaterialCommunityIcons name="camera" size={15} color="#ffffff" />
+                        </View>
+                      </>
+                    ) : imageUploading ? (
+                      <ActivityIndicator color="#ea580c" />
+                    ) : (
+                      <>
+                        <MaterialCommunityIcons name="camera-plus-outline" size={25} color="#ea580c" />
+                        <Text style={styles.photoPickerText}>Add Image</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                  <View style={styles.photoHelp}>
+                    <Text style={styles.photoHelpTitle}>{imageUploading ? 'Uploading photo…' : imageUrl ? 'Saved to Cloudinary' : selectedImageAsset ? 'Selected — uploads when you post' : 'Take a photo or choose one from your gallery'}</Text>
+                    {!!imageUploadError && <Text style={styles.photoError}>{imageUploadError}</Text>}
+                  </View>
+                </View>
+
                 {/* Quantity and Unit */}
                 <View style={styles.row}>
                   <View style={{ flex: 1, marginRight: 10 }}>
@@ -245,6 +383,19 @@ export default function CreateListingModal({ visible, onClose, onSuccess, listin
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
+                <View style={styles.customHoursRow}>
+                  <Text style={styles.customHoursLabel}>Custom:</Text>
+                  <TextInput
+                    style={styles.customHoursInput}
+                    value={String(safeHours)}
+                    onChangeText={(value) => setSafeHours(value === '' ? '' : Number.parseInt(value.replace(/\D/g, ''), 10))}
+                    keyboardType="number-pad"
+                    maxLength={3}
+                    selectTextOnFocus
+                    accessibilityLabel="Custom safe-until duration in hours"
+                  />
+                  <Text style={styles.customHoursLabel}>hours</Text>
+                </View>
 
                 {/* Veg Toggle */}
                 <View style={styles.vegRow}>
@@ -280,7 +431,7 @@ export default function CreateListingModal({ visible, onClose, onSuccess, listin
                   style={styles.submitButton}
                   activeOpacity={0.8}
                   onPress={handleSubmit}
-                  disabled={loading}
+                  disabled={loading || imageUploading}
                 >
                   {loading ? (
                     <ActivityIndicator color="#ffffff" />
@@ -292,6 +443,36 @@ export default function CreateListingModal({ visible, onClose, onSuccess, listin
                   )}
                 </TouchableOpacity>
               </ScrollView>
+              {imageSourceChooserVisible && (
+                <View style={styles.photoSourceOverlay}>
+                  <TouchableOpacity
+                    style={StyleSheet.absoluteFillObject}
+                    activeOpacity={1}
+                    onPress={() => setImageSourceChooserVisible(false)}
+                    accessibilityLabel="Close photo source menu"
+                  />
+                  <View style={styles.photoSourceCard}>
+                    <Text style={styles.photoSourceTitle}>Add item photo</Text>
+                    <TouchableOpacity
+                      style={styles.photoSourceOption}
+                      onPress={() => { setImageSourceChooserVisible(false); selectImageAsset('camera'); }}
+                    >
+                      <MaterialCommunityIcons name="camera-outline" size={21} color="#c2410c" />
+                      <Text style={styles.photoSourceOptionText}>Take a photo</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.photoSourceOption}
+                      onPress={() => { setImageSourceChooserVisible(false); selectImageAsset('library'); }}
+                    >
+                      <MaterialCommunityIcons name="image-multiple-outline" size={21} color="#c2410c" />
+                      <Text style={styles.photoSourceOptionText}>Choose from gallery</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.photoSourceCancel} onPress={() => setImageSourceChooserVisible(false)}>
+                      <Text style={styles.photoSourceCancelText}>Cancel</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
             </View>
           </TouchableWithoutFeedback>
         </KeyboardAvoidingView>
@@ -307,6 +488,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContainer: {
+    position: 'relative',
     backgroundColor: '#ffffff',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
@@ -391,6 +573,23 @@ const styles = StyleSheet.create({
     letterSpacing: 0,
     marginBottom: 14,
   },
+  photoPickerRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 },
+  photoPickerSquare: { width: 112, height: 112, borderWidth: 1.5, borderStyle: 'dashed', borderColor: '#fdba74', borderRadius: 12, backgroundColor: '#fff7ed', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  photoPickerSquareFilled: { borderStyle: 'solid', borderColor: '#fed7aa', backgroundColor: '#fff' },
+  photoPreview: { width: '100%', height: '100%' },
+  photoCameraBadge: { position: 'absolute', right: 6, bottom: 6, width: 28, height: 28, borderRadius: 14, backgroundColor: '#ea580c', alignItems: 'center', justifyContent: 'center' },
+  photoPickerText: { color: '#c2410c', fontSize: 11, fontWeight: '800', marginTop: 5 },
+  requiredMark: { color: '#dc2626' },
+  photoHelp: { flex: 1, minWidth: 0, gap: 8 },
+  photoHelpTitle: { color: '#475569', fontSize: 12, lineHeight: 17, fontWeight: '600' },
+  photoError: { color: '#b91c1c', fontSize: 10, lineHeight: 14 },
+  photoSourceOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 20, elevation: 20, backgroundColor: 'rgba(15, 23, 42, 0.42)', alignItems: 'center', justifyContent: 'center', padding: 22 },
+  photoSourceCard: { width: '100%', maxWidth: 340, backgroundColor: '#ffffff', borderRadius: 18, padding: 18, gap: 9, shadowColor: '#0f172a', shadowOpacity: 0.18, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 8 },
+  photoSourceTitle: { fontSize: 17, fontWeight: '800', color: '#0f172a', marginBottom: 4 },
+  photoSourceOption: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, borderRadius: 11, backgroundColor: '#fff7ed' },
+  photoSourceOptionText: { color: '#334155', fontSize: 14, fontWeight: '700' },
+  photoSourceCancel: { alignSelf: 'flex-end', paddingHorizontal: 12, paddingVertical: 8 },
+  photoSourceCancelText: { color: '#64748b', fontSize: 13, fontWeight: '700' },
   row: {
     flexDirection: 'row',
     marginBottom: 6,
@@ -419,7 +618,7 @@ const styles = StyleSheet.create({
   },
   windowRow: {
     gap: 8,
-    paddingBottom: 14,
+    paddingBottom: 8,
   },
   windowChip: {
     paddingHorizontal: 12,
@@ -438,6 +637,9 @@ const styles = StyleSheet.create({
   activeWindowText: {
     color: '#ffffff',
   },
+  customHoursRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },
+  customHoursLabel: { fontSize: 12, fontWeight: '600', color: '#64748b' },
+  customHoursInput: { width: 64, paddingHorizontal: 10, paddingVertical: 7, textAlign: 'center', borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, color: '#111827', fontWeight: '700' },
   vegRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

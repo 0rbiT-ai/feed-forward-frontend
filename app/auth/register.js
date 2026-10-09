@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -12,10 +12,11 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import { api } from '../../src/api/client';
 import LocationMapPicker from '../../src/components/LocationMapPicker';
+import * as AuthStorage from '../../src/storage/authStorage';
 
 const ROLE_OPTIONS = [
   {
@@ -48,6 +49,23 @@ export default function RegisterScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [googleRegistrationToken, setGoogleRegistrationToken] = useState('');
+  const [googleRegistrationEmail, setGoogleRegistrationEmail] = useState('');
+
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    Promise.all([
+      AuthStorage.getItemAsync('feedforward_google_registration_token'),
+      AuthStorage.getItemAsync('feedforward_google_registration_email'),
+    ]).then(([token, googleEmail]) => {
+      if (!active || !token || !googleEmail) return;
+      setGoogleRegistrationToken(token);
+      setGoogleRegistrationEmail(googleEmail);
+      setEmail(googleEmail);
+      setError(null);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []));
 
   const handleDetectLocation = async () => {
     setLocating(true);
@@ -138,7 +156,12 @@ export default function RegisterScreen() {
         darpanId: darpanId.trim(),
         latitude: locationCoords.latitude,
         longitude: locationCoords.longitude,
+        ...(googleRegistrationToken ? { googleRegistrationToken } : {}),
       });
+      if (googleRegistrationToken) {
+        await AuthStorage.deleteItemAsync('feedforward_google_registration_token').catch(() => {});
+        await AuthStorage.deleteItemAsync('feedforward_google_registration_email').catch(() => {});
+      }
       if (data.requiresEmailVerification) {
         router.replace({
           pathname: '/auth/verify-email',
@@ -181,6 +204,32 @@ export default function RegisterScreen() {
             <Text style={styles.title}>Create Account</Text>
             <Text style={styles.subtitle}>Join the surplus food rescue network</Text>
           </View>
+
+          {/* Role Selection */}
+          <TouchableOpacity
+            style={styles.googleLinkButton}
+            activeOpacity={0.85}
+            onPress={() => {
+              if (googleRegistrationToken) return;
+              setError(null);
+              router.push({ pathname: '/auth/google-oauth', params: { mode: 'register' } });
+            }}
+          >
+            <MaterialCommunityIcons name={googleRegistrationToken ? 'check-circle' : 'google'} size={18} color={googleRegistrationToken ? '#059669' : '#4285F4'} />
+            <Text style={styles.googleLinkText}>{googleRegistrationToken ? `Google linked: ${googleRegistrationEmail}` : 'Link Google account (optional)'}</Text>
+            {googleRegistrationToken ? (
+              <TouchableOpacity onPress={async (event) => {
+                event.stopPropagation();
+                setGoogleRegistrationToken('');
+                setGoogleRegistrationEmail('');
+                setEmail('');
+                await AuthStorage.deleteItemAsync('feedforward_google_registration_token').catch(() => {});
+                await AuthStorage.deleteItemAsync('feedforward_google_registration_email').catch(() => {});
+              }}>
+                <Text style={styles.googleUnlinkText}>Remove</Text>
+              </TouchableOpacity>
+            ) : null}
+          </TouchableOpacity>
 
           {/* Role Selection */}
           <Text style={styles.sectionLabel}>I am joining as a:</Text>
@@ -272,6 +321,7 @@ export default function RegisterScreen() {
                 placeholderTextColor="#9ca3af"
                 value={email}
                 onChangeText={setEmail}
+                editable={!googleRegistrationToken}
                 autoCapitalize="none"
                 keyboardType="email-address"
                 autoComplete="email"
@@ -438,6 +488,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6b7280',
   },
+  googleLinkButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, borderWidth: 1, borderColor: '#dbe2ea', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 12, marginBottom: 16, backgroundColor: '#fff' },
+  googleLinkText: { color: '#334155', fontSize: 13, fontWeight: '700', flex: 1, textAlign: 'center' },
+  googleUnlinkText: { color: '#dc2626', fontSize: 12, fontWeight: '800' },
   sectionLabel: {
     fontSize: 13,
     fontWeight: '700',

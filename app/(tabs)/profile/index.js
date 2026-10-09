@@ -10,6 +10,7 @@ import {
   Alert,
   Platform,
   SafeAreaView,
+  Linking,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -27,8 +28,9 @@ export default function ProfileScreen() {
   const [editMode, setEditMode] = useState(false);
   const [adminPartners, setAdminPartners] = useState(null);
   const [adminLoading, setAdminLoading] = useState(false);
-  const [karmaHistory, setKarmaHistory] = useState([]);
   const [leaderboard, setLeaderboard] = useState(null);
+  const [googleActionBusy, setGoogleActionBusy] = useState(false);
+  const [googleActionMessage, setGoogleActionMessage] = useState('');
 
   // Form edit states
   const [editedName, setEditedName] = useState('');
@@ -39,7 +41,6 @@ export default function ProfileScreen() {
   useFocusEffect(
     React.useCallback(() => {
       fetchProfile();
-      if (!isAdmin) api.getKarmaHistory().then(setKarmaHistory).catch(() => setKarmaHistory([]));
       if (!isAdmin) api.getLeaderboard().then(setLeaderboard).catch(() => setLeaderboard(null));
       if (isAdmin) {
         fetchAdminPartners();
@@ -73,6 +74,30 @@ export default function ProfileScreen() {
       setAdminLoading(false);
     }
   }
+
+  const handleUnlinkGoogle = async () => {
+    const unlink = async () => {
+      setGoogleActionBusy(true);
+      setGoogleActionMessage('');
+      try {
+        await api.unlinkGoogleAccount();
+        await fetchProfile();
+        setGoogleActionMessage('Google account unlinked. You can still sign in with your FeedForward password.');
+      } catch (err) {
+        setGoogleActionMessage(err.message || 'Could not unlink the Google account.');
+      } finally {
+        setGoogleActionBusy(false);
+      }
+    };
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm('Unlink this Google account? You can still sign in with your FeedForward password.')) await unlink();
+      return;
+    }
+    Alert.alert('Unlink Google?', 'You can still sign in with your FeedForward password.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Unlink', style: 'destructive', onPress: () => { void unlink(); } },
+    ]);
+  };
 
   const handleReviewPartner = async (partnerType, partnerId, status) => {
     try {
@@ -141,7 +166,7 @@ export default function ProfileScreen() {
     );
   }
 
-  const karma = profile?.karmaScore ?? 100;
+  const karma = profile?.karmaScore ?? 0;
   const warnings = profile?.warningCount ?? 0;
   const strikes = profile?.strikeCount ?? 0;
 
@@ -172,12 +197,12 @@ export default function ProfileScreen() {
             </View>
 
             <View style={styles.profileMeta}>
-              <Text style={styles.nameText}>{profile?.name || (isRestaurant ? 'Partner Kitchen' : 'Robin Hood Army')}</Text>
+              <Text style={styles.nameText}>{profile?.name || (isRestaurant ? 'Restaurant' : 'NGO')}</Text>
               <Text style={styles.roleBadge}>
                 {isRestaurant ? 'VERIFIED DONOR PARTNER' : 'VERIFIED RESCUE NGO'}
               </Text>
-              <Text style={styles.contactText}>{profile?.email || 'user@feedforward.org'}</Text>
-              <Text style={styles.contactText}>{profile?.phone || '+91 98765 43210'}</Text>
+              {profile?.email ? <Text style={styles.contactText}>{profile.email}</Text> : null}
+              {profile?.phone ? <Text style={styles.contactText}>{profile.phone}</Text> : null}
             </View>
           </View>
 
@@ -187,11 +212,11 @@ export default function ProfileScreen() {
               <>
                 <View style={styles.legalBadge}>
                   <MaterialCommunityIcons name="certificate" size={14} color="#059669" />
-                  <Text style={styles.legalBadgeText}>{profile?.taxExemption || 'Section 80G Certified'}</Text>
+                    <Text style={styles.legalBadgeText}>{profile?.taxExemption || 'Certification not added'}</Text>
                 </View>
                 <View style={styles.legalBadge}>
                   <MaterialCommunityIcons name="identifier" size={14} color="#059669" />
-                  <Text style={styles.legalBadgeText}>Darpan: {profile?.darpanId || 'KA/2026/019284'}</Text>
+                  <Text style={styles.legalBadgeText}>Darpan: {profile?.darpanId || 'Not added'}</Text>
                 </View>
               </>
             ) : (
@@ -199,19 +224,41 @@ export default function ProfileScreen() {
                 <View style={[styles.legalBadge, { backgroundColor: '#fff7ed', borderColor: '#fed7aa' }]}>
                   <MaterialCommunityIcons name="shield-check" size={14} color="#c2410c" />
                   <Text style={[styles.legalBadgeText, { color: '#c2410c' }]}>
-                    FSSAI: {profile?.fssaiNumber || '11223344556677'}
+                    FSSAI: {profile?.fssaiNumber || 'Not added'}
                   </Text>
                 </View>
                 <View style={[styles.legalBadge, { backgroundColor: '#fff7ed', borderColor: '#fed7aa' }]}>
                   <MaterialCommunityIcons name="silverware-fork-knife" size={14} color="#c2410c" />
                   <Text style={[styles.legalBadgeText, { color: '#c2410c' }]}>
-                    {profile?.cuisineType || 'Multi-Cuisine'}
+                    {profile?.cuisineType || 'Cuisine not added'}
                   </Text>
                 </View>
               </>
             )}
           </View>
         </View>
+
+        {!isAdmin && (
+          <View style={styles.googleAccountCard}>
+            <View style={styles.googleAccountTop}>
+              <View style={styles.googleAccountIcon}><MaterialCommunityIcons name="google" size={19} color="#4285F4" /></View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.googleAccountTitle}>Google account</Text>
+                <Text style={styles.googleAccountSub}>{profile?.googleLinked ? `Linked · ${profile.googleEmail || 'Google account'}` : 'Link the Google account with your FeedForward email'}</Text>
+              </View>
+              {profile?.googleLinked ? (
+                <TouchableOpacity style={styles.googleAccountAction} onPress={handleUnlinkGoogle} disabled={googleActionBusy}>
+                  {googleActionBusy ? <ActivityIndicator size="small" color="#dc2626" /> : <Text style={styles.googleUnlinkActionText}>Unlink</Text>}
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={styles.googleAccountAction} onPress={() => router.push({ pathname: '/auth/google-oauth', params: { mode: 'link' } })}>
+                  <Text style={styles.googleLinkActionText}>Link</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+            {googleActionMessage ? <Text style={styles.googleActionMessage}>{googleActionMessage}</Text> : null}
+          </View>
+        )}
 
         {/* Karma & Reputation Meter */}
         <View style={styles.karmaCard}>
@@ -240,22 +287,11 @@ export default function ProfileScreen() {
                 size={15}
                 color={strikes > 0 ? '#ef4444' : '#6b7280'}
               />
-              <Text style={styles.trustItemText}>
-                {strikes === 0 ? '0 Policy Strikes' : `${strikes} Strikes (Limit: 3)`}
-              </Text>
+              <Text style={styles.trustItemText}>{strikes === 0 ? '0 Policy Strikes' : `${strikes} Strikes (Limit: 3)`}</Text>
             </View>
           </View>
+          <Text style={styles.strikeRecoveryHint}>Each successful handover clears one strike.</Text>
         </View>
-
-        {!isAdmin && <View style={styles.karmaHistoryCard}>
-          <View style={styles.karmaHistoryHeader}><MaterialCommunityIcons name="history" size={19} color="#059669" /><Text style={styles.karmaHistoryTitle}>Karma history</Text></View>
-          {karmaHistory.length ? karmaHistory.slice(0, 5).map((entry) => (
-            <View key={entry.id} style={styles.karmaHistoryRow}>
-              <View style={{ flex: 1 }}><Text style={styles.karmaHistoryAction}>{entry.reason || entry.action.replace(/_/g, ' ')}</Text><Text style={styles.karmaHistoryDate}>{entry.createdAt}</Text></View>
-              <Text style={[styles.karmaDelta, entry.pointsDelta >= 0 ? styles.karmaEarned : styles.karmaLost]}>{entry.pointsDelta > 0 ? '+' : ''}{entry.pointsDelta} pts</Text>
-            </View>
-          )) : <Text style={styles.karmaHistoryEmpty}>Verified collections and handovers will appear here.</Text>}
-        </View>}
 
         {!isAdmin && leaderboard && <View style={styles.karmaHistoryCard}>
           <View style={styles.karmaHistoryHeader}><MaterialCommunityIcons name="trophy-outline" size={19} color="#d97706" /><Text style={styles.karmaHistoryTitle}>Top karma partners</Text></View>
@@ -271,7 +307,7 @@ export default function ProfileScreen() {
           <View style={styles.metricCard}>
             <MaterialCommunityIcons name="silverware-fork-knife" size={24} color="#10b981" />
             <Text style={styles.metricNumber}>
-              {!isRestaurant ? (profile?.impactStats?.totalMealsRescued ?? 3420) : (profile?.impactStats?.totalMealsDonated ?? 420)}
+              {!isRestaurant ? (profile?.impactStats?.totalMealsRescued ?? 0) : (profile?.impactStats?.totalMealsDonated ?? 0)}
             </Text>
             <Text style={styles.metricLabel}>{!isRestaurant ? 'Meals Rescued' : 'Meals Donated'}</Text>
           </View>
@@ -279,7 +315,7 @@ export default function ProfileScreen() {
           <View style={styles.metricCard}>
             <MaterialCommunityIcons name="trash-can-outline" size={24} color="#f59e0b" />
             <Text style={styles.metricNumber}>
-              {profile?.impactStats?.foodWastePreventedKg ?? 1710} kg
+              {profile?.impactStats?.foodWastePreventedKg ?? 0} kg
             </Text>
             <Text style={styles.metricLabel}>Food Waste Prevented</Text>
           </View>
@@ -287,7 +323,7 @@ export default function ProfileScreen() {
           <View style={styles.metricCard}>
             <MaterialCommunityIcons name="molecule-co2" size={24} color="#059669" />
             <Text style={styles.metricNumber}>
-              {profile?.impactStats?.co2eAvoidedTonnes ?? 4.28} T
+              {profile?.impactStats?.co2eAvoidedTonnes ?? 0} T
             </Text>
             <Text style={styles.metricLabel}>CO2e Emissions Avoided</Text>
           </View>
@@ -295,7 +331,7 @@ export default function ProfileScreen() {
           <View style={styles.metricCard}>
             <MaterialCommunityIcons name="handshake-outline" size={24} color="#6366f1" />
             <Text style={styles.metricNumber}>
-              {!isRestaurant ? (profile?.impactStats?.activeRestaurantPartners ?? 28) : '15'}
+              {!isRestaurant ? (profile?.impactStats?.activeRestaurantPartners ?? 0) : (profile?.impactStats?.activeNgoPartners ?? 0)}
             </Text>
             <Text style={styles.metricLabel}>Active Network Partners</Text>
           </View>
@@ -427,8 +463,10 @@ export default function ProfileScreen() {
                       </Text>
                     </View>
                     <Text style={styles.partnerEmail}>{partner.owner?.email}</Text>
+                    <Text style={styles.partnerDocument}>{partner.partnerType === 'RESTAURANT' ? 'FSSAI license' : 'NGO Darpan ID'}: {partner.partnerType === 'RESTAURANT' ? (partner.fssaiNumber || 'Not provided') : (partner.darpanId || 'Not provided')}</Text>
                     <Text style={styles.partnerDocument}>Document: {partner.documentStatus || 'NOT_SUBMITTED'}</Text>
                     {partner.documentName && <Text style={styles.partnerDocument}>File: {partner.documentName}</Text>}
+                    {partner.documentUrl ? <TouchableOpacity onPress={() => Linking.openURL(partner.documentUrl).catch(() => Alert.alert('Could not open document', 'Check the document URL and try again.'))}><Text style={styles.editText}>Open verification document</Text></TouchableOpacity> : null}
                     {partner.approvalReason && <Text style={styles.partnerReason}>Reason: {partner.approvalReason}</Text>}
                     {partner.approvalStatus === 'PENDING' && (
                       <View style={styles.adminActions}>
@@ -578,9 +616,16 @@ const styles = StyleSheet.create({
   karmaHistoryAction: { fontSize: 13, fontWeight: '700', color: '#334155' },
   karmaHistoryDate: { fontSize: 11, color: '#94a3b8', marginTop: 3 },
   karmaDelta: { fontSize: 13, fontWeight: '800', color: '#475569' },
-  karmaEarned: { color: '#059669' },
-  karmaLost: { color: '#dc2626' },
-  karmaHistoryEmpty: { fontSize: 12, color: '#64748b', paddingVertical: 8 },
+  googleAccountCard: { backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: '#e2e8f0', padding: 14, marginBottom: 14 },
+  googleAccountTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  googleAccountIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#eff6ff', alignItems: 'center', justifyContent: 'center' },
+  googleAccountTitle: { fontSize: 13, fontWeight: '800', color: '#0f172a' },
+  googleAccountSub: { fontSize: 11, color: '#64748b', marginTop: 2 },
+  googleAccountAction: { minWidth: 62, alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 9, backgroundColor: '#f1f5f9' },
+  googleUnlinkActionText: { color: '#dc2626', fontSize: 12, fontWeight: '800' },
+  googleLinkActionText: { color: '#2563eb', fontSize: 12, fontWeight: '800' },
+  googleActionMessage: { fontSize: 11, color: '#64748b', marginTop: 9 },
+  strikeRecoveryHint: { fontSize: 10, color: '#9ca3af', marginTop: 8 },
   karmaTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

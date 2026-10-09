@@ -142,6 +142,24 @@ export const api = {
     }
   },
 
+  async getCloudinaryUploadSignature() {
+    try {
+      const res = await apiClient.post('/api/uploads/cloudinary-signature');
+      return res.data;
+    } catch (err) {
+      throw new Error(err.response?.data?.message || err.message || 'Could not prepare image upload');
+    }
+  },
+
+  async deleteCloudinaryUpload(publicId) {
+    try {
+      const res = await apiClient.delete('/api/uploads/cloudinary-image', { data: { publicId } });
+      return res.data;
+    } catch (err) {
+      throw new Error(err.response?.data?.message || err.message || 'Could not remove the unused image');
+    }
+  },
+
   async login(email, password, channel = 'email', role) {
     try {
       const res = await apiClient.post('/auth/login', { email, password, channel, role });
@@ -169,6 +187,24 @@ export const api = {
     } catch (err) {
       if (err.response?.data) throw err.response.data;
       throw new Error('Could not verify your email');
+    }
+  },
+
+  async createGoogleLinkSession(redirectUri = 'feedforward://auth/google') {
+    try {
+      const res = await apiClient.post('/auth/google/link-session', { redirectUri });
+      return res.data.authorizationUrl;
+    } catch (err) {
+      throw new Error(err.response?.data?.message || err.message || 'Could not start Google account linking');
+    }
+  },
+
+  async unlinkGoogleAccount() {
+    try {
+      const res = await apiClient.delete('/api/profile/google-link');
+      return res.data;
+    } catch (err) {
+      throw new Error(err.response?.data?.message || err.message || 'Could not unlink Google account');
     }
   },
 

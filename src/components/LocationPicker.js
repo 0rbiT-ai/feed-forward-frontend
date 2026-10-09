@@ -113,10 +113,6 @@ export default function LocationPicker({
                   </View>
                 </View>
 
-                {/* Nearby Restaurant Mock Radar Dots */}
-                <View style={[styles.radarDot, { top: 30, left: 50 }]} />
-                <View style={[styles.radarDot, { bottom: 40, right: 60 }]} />
-                <View style={[styles.radarDot, { top: 60, right: 90 }]} />
               </View>
 
               {/* Coordinates Pill */}

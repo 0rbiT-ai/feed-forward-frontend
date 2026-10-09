@@ -89,12 +89,20 @@ export default function DiscoverScreen() {
 
   // Restaurant Suite States
   const [restaurantListings, setRestaurantListings] = useState([]);
+  const [restaurantListingTab, setRestaurantListingTab] = useState('active');
+  const [listingClock, setListingClock] = useState(Date.now());
   const [incomingPickups, setIncomingPickups] = useState([]);
   const [donationHistory, setDonationHistory] = useState([]);
   const [restaurantStats, setRestaurantStats] = useState(null);
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [editingListing, setEditingListing] = useState(null);
   const [verifyModalReservation, setVerifyModalReservation] = useState(null);
+  const [deleteConfirmationListing, setDeleteConfirmationListing] = useState(null);
+  const [deleteConfirmationName, setDeleteConfirmationName] = useState('');
+  const [deleteConfirmationMode, setDeleteConfirmationMode] = useState('single');
+  const [deleteConfirmationVisible, setDeleteConfirmationVisible] = useState(false);
+  const [deleteListingError, setDeleteListingError] = useState('');
+  const [deletingListing, setDeletingListing] = useState(false);
 
   // NGO Claim Modal State
   const [selectedListing, setSelectedListing] = useState(null);
@@ -104,6 +112,11 @@ export default function DiscoverScreen() {
   const [shelterDestination, setShelterDestination] = useState('Asha Kiran Community Shelter');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const dataLoaders = useRef({});
+
+  useEffect(() => {
+    const timer = setInterval(() => setListingClock(Date.now()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Socket connection
   useEffect(() => {
@@ -283,26 +296,47 @@ export default function DiscoverScreen() {
   };
 
   const handleDeleteListing = async (listing) => {
-    Alert.alert(
-      'Delete Listing?',
-      'This removes the listing only if it has no active or completed reservations.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await api.deleteRestaurantListing(listing.id);
-              Alert.alert('Deleted', 'The surplus listing was removed.');
-              fetchRestaurantData();
-            } catch (err) {
-              Alert.alert('Delete Failed', err.message);
-            }
-          },
-        },
-      ]
-    );
+    setDeleteListingError('');
+    setDeleteConfirmationMode('single');
+    setDeleteConfirmationListing(listing);
+    setDeleteConfirmationName(listing.foodName || 'This listing');
+    setDeleteConfirmationVisible(true);
+  };
+
+  const confirmDeleteListing = async () => {
+    if (deletingListing) return;
+    setDeletingListing(true);
+    try {
+      if (deleteConfirmationMode === 'clear-expired') {
+        const expiredItems = restaurantListings.filter((item) => new Date(item.safeUntil).getTime() <= listingClock);
+        const removedIds = [];
+        let blockedCount = 0;
+        for (const item of expiredItems) {
+          try {
+            await api.deleteRestaurantListing(item.id);
+            removedIds.push(item.id);
+          } catch {
+            blockedCount += 1;
+          }
+        }
+        setRestaurantListings((current) => current.filter((item) => !removedIds.includes(item.id)));
+        if (blockedCount > 0) {
+          setDeleteListingError(`${removedIds.length} removed. ${blockedCount} kept because a pickup is still waiting. Complete or cancel those pickups, then clear again.`);
+        } else {
+          setDeleteConfirmationVisible(false);
+        }
+      } else {
+        if (!deleteConfirmationListing) return;
+        await api.deleteRestaurantListing(deleteConfirmationListing.id);
+        setRestaurantListings((current) => current.filter((item) => item.id !== deleteConfirmationListing.id));
+        setDeleteConfirmationVisible(false);
+      }
+      fetchRestaurantData();
+    } catch (err) {
+      setDeleteListingError(err.message || 'Could not remove this listing.');
+    } finally {
+      setDeletingListing(false);
+    }
   };
 
   const handleNoShow = async (reservation) => {
@@ -384,7 +418,7 @@ export default function DiscoverScreen() {
             <Text style={styles.restoName} numberOfLines={1}>{item.restaurant}</Text>
             <View style={styles.subMetaRow}>
               <MaterialCommunityIcons name="star" size={13} color="#f59e0b" />
-              <Text style={styles.karmaBadgeText}>Karma {item.restaurantKarma || 100}</Text>
+              <Text style={styles.karmaBadgeText}>Karma {item.restaurantKarma ?? 0}</Text>
               <Text style={styles.dot}>•</Text>
               <MaterialCommunityIcons name="map-marker-distance" size={13} color="#6b7280" />
               <Text style={styles.distText}>{item.distance}</Text>
@@ -567,18 +601,29 @@ export default function DiscoverScreen() {
   // RENDER: RESTAURANT SURPLUS LISTINGS
   // ------------------------------------------
   const renderRestaurantListingCard = ({ item }) => {
-    const isExpired = new Date(item.safeUntil).getTime() <= Date.now();
+    const isExpired = new Date(item.safeUntil).getTime() <= listingClock;
     return (
-    <View style={styles.restoListingCard}>
-              <View style={styles.cardHeaderRow}>
-        <View style={{ flex: 1, minWidth: 0, marginRight: 8 }}>
-          <Text style={styles.foodTitle} numberOfLines={2}>{item.foodName}</Text>
-          <Text style={styles.restoCat}>{item.category} • {item.quantityUnit || 'servings'}</Text>
+    <View style={[styles.restoListingCard, isExpired && styles.expiredListingCard]}>
+      <View style={styles.restaurantListingTopRow}>
+        <View style={styles.restaurantListingThumb}>
+          {item.imageUrl ? (
+            <Image source={{ uri: item.imageUrl }} style={styles.restaurantListingThumbImage} accessibilityLabel={`${item.foodName} photo`} />
+          ) : (
+            <MaterialCommunityIcons name="food-outline" size={26} color="#94a3b8" />
+          )}
         </View>
-        <View style={[styles.statusPill, isExpired ? styles.reservedPill : item.status === 'ACTIVE' ? styles.activePill : styles.reservedPill]}>
-          <Text style={[styles.statusPillText, (isExpired || item.status !== 'ACTIVE') && { color: '#d97706' }]}>
-            {isExpired ? 'EXPIRED' : item.status === 'PARTIALLY_RESERVED' ? 'PARTIAL' : item.status === 'FULLY_RESERVED' ? 'RESERVED' : item.status}
-          </Text>
+        <View style={styles.restaurantListingTextCol}>
+          <View style={styles.cardHeaderRow}>
+            <View style={{ flex: 1, minWidth: 0, marginRight: 8 }}>
+              <Text style={styles.foodTitle} numberOfLines={2}>{item.foodName}</Text>
+              <Text style={styles.restoCat}>{item.category} • {item.quantityUnit || 'servings'}</Text>
+            </View>
+            <View style={[styles.statusPill, isExpired ? styles.reservedPill : item.status === 'ACTIVE' ? styles.activePill : styles.reservedPill]}>
+              <Text style={[styles.statusPillText, (isExpired || item.status !== 'ACTIVE') && { color: '#d97706' }]}>
+                {isExpired ? 'EXPIRED' : item.status === 'PARTIALLY_RESERVED' ? 'PARTIAL' : item.status === 'FULLY_RESERVED' ? 'RESERVED' : item.status}
+              </Text>
+            </View>
+          </View>
         </View>
       </View>
 
@@ -598,10 +643,12 @@ export default function DiscoverScreen() {
       </View>
 
       <View style={styles.listingActionsRow}>
-        <TouchableOpacity style={styles.editListingBtn} onPress={() => handleEditListing(item)}>
-          <MaterialCommunityIcons name="pencil" size={16} color="#475569" />
-          <Text style={styles.listingActionText}>Edit</Text>
-        </TouchableOpacity>
+        {!isExpired ? (
+          <TouchableOpacity style={styles.editListingBtn} onPress={() => handleEditListing(item)}>
+            <MaterialCommunityIcons name="pencil" size={16} color="#475569" />
+            <Text style={styles.listingActionText}>Edit</Text>
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity style={styles.deleteListingBtn} onPress={() => handleDeleteListing(item)}>
           <MaterialCommunityIcons name="trash-can" size={16} color="#dc2626" />
           <Text style={styles.listingActionText}>Delete</Text>
@@ -663,6 +710,7 @@ export default function DiscoverScreen() {
   );
 
   const visibleRestaurantListings = restaurantListings
+    .filter((item) => (new Date(item.safeUntil).getTime() <= listingClock) === (restaurantListingTab === 'expired'))
     .filter((item) => activeCategory === 'ALL' || getRestaurantListingCategory(item) === activeCategory)
     .sort((a, b) => {
       if (restaurantSort === 'pickups') return (b.reservations?.length || 0) - (a.reservations?.length || 0);
@@ -764,45 +812,76 @@ export default function DiscoverScreen() {
             <View style={styles.impactContainer}>
               <View style={styles.impactCard}>
                 <MaterialCommunityIcons name="charity" size={36} color="#10b981" />
-                <Text style={styles.impactNumber}>{profile?.impactStats?.totalMealsRescued ?? 3420}</Text>
+                <Text style={styles.impactNumber}>{profile?.impactStats?.totalMealsRescued ?? 0}</Text>
                 <Text style={styles.impactLabel}>Total Meals Rescued</Text>
               </View>
               <View style={styles.impactRow}>
                 <View style={[styles.impactCard, { flex: 1, marginRight: 8 }]}>
                   <MaterialCommunityIcons name="trash-can-outline" size={26} color="#f59e0b" />
-                  <Text style={styles.impactNumberSmall}>{profile?.impactStats?.foodWastePreventedKg ?? 1710} kg</Text>
+                  <Text style={styles.impactNumberSmall}>{profile?.impactStats?.foodWastePreventedKg ?? 0} kg</Text>
                   <Text style={styles.impactLabel}>Waste Prevented</Text>
                 </View>
                 <View style={[styles.impactCard, { flex: 1 }]}>
                   <MaterialCommunityIcons name="molecule-co2" size={26} color="#059669" />
-                  <Text style={styles.impactNumberSmall}>{profile?.impactStats?.co2eAvoidedTonnes ?? 4.28} T</Text>
+                  <Text style={styles.impactNumberSmall}>{profile?.impactStats?.co2eAvoidedTonnes ?? 0} T</Text>
                   <Text style={styles.impactLabel}>CO2e Avoided</Text>
                 </View>
               </View>
               <View style={styles.karmaMeterBox}>
-                <Text style={styles.karmaMeterTitle}>Reputation Score: {profile?.karmaScore ?? 100} pts</Text>
-                <Text style={styles.karmaMeterSub}>High trust standing • Gold Partner</Text>
+                <Text style={styles.karmaMeterTitle}>Reputation Score: {profile?.karmaScore ?? 0} pts</Text>
+                <Text style={styles.karmaMeterSub}>Earn points through completed collections</Text>
               </View>
             </View>
           )
         ) : (
           // ==================== RESTAURANT SCREENS ====================
           currentSegment === 'restaurant_listings' ? (
-            <FlatList
-              data={visibleRestaurantListings}
-              renderItem={renderRestaurantListingCard}
-              keyExtractor={(item) => String(item.id)}
-              contentContainerStyle={styles.listContent}
-              showsVerticalScrollIndicator={false}
-              refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={['#ea580c']} />}
-              ListEmptyComponent={
-                <View style={styles.emptyContainer}>
-                  <MaterialCommunityIcons name="storefront-outline" size={48} color="#9ca3af" />
-                  <Text style={styles.emptyTitle}>{activeCategory === 'ALL' ? 'No Active Listings' : `No ${activeCategory} Listings`}</Text>
-                  <Text style={styles.emptySub}>{activeCategory === 'ALL' ? 'Tap "+ Post" above to broadcast cooked meals, bakery, or raw grains.' : 'Try another category or post a listing in this category.'}</Text>
-                </View>
-              }
-            />
+            <View style={{ flex: 1 }}>
+              <View style={styles.listingStatusTabs}>
+                <TouchableOpacity
+                  style={[styles.listingStatusTab, restaurantListingTab === 'active' && styles.listingStatusTabActive]}
+                  onPress={() => setRestaurantListingTab('active')}
+                >
+                  <Text style={[styles.listingStatusTabText, restaurantListingTab === 'active' && styles.listingStatusTabTextActive]}>Active ({restaurantListings.filter((item) => new Date(item.safeUntil).getTime() > listingClock).length})</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.listingStatusTab, restaurantListingTab === 'expired' && styles.listingStatusTabActive]}
+                  onPress={() => setRestaurantListingTab('expired')}
+                >
+                  <Text style={[styles.listingStatusTabText, restaurantListingTab === 'expired' && styles.listingStatusTabTextActive]}>Expired ({restaurantListings.filter((item) => new Date(item.safeUntil).getTime() <= listingClock).length})</Text>
+                </TouchableOpacity>
+                {restaurantListingTab === 'expired' && restaurantListings.some((item) => new Date(item.safeUntil).getTime() <= listingClock) ? (
+                  <TouchableOpacity
+                    style={styles.clearExpiredButton}
+                    onPress={() => {
+                      setDeleteListingError('');
+                      setDeleteConfirmationMode('clear-expired');
+                      setDeleteConfirmationListing(null);
+                      setDeleteConfirmationName('');
+                      setDeleteConfirmationVisible(true);
+                    }}
+                  >
+                    <MaterialCommunityIcons name="delete-sweep-outline" size={15} color="#b91c1c" />
+                    <Text style={styles.clearExpiredButtonText}>Clear all</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+              <FlatList
+                data={visibleRestaurantListings}
+                renderItem={renderRestaurantListingCard}
+                keyExtractor={(item) => String(item.id)}
+                contentContainerStyle={styles.listContent}
+                showsVerticalScrollIndicator={false}
+                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={['#ea580c']} />}
+                ListEmptyComponent={
+                  <View style={styles.emptyContainer}>
+                    <MaterialCommunityIcons name={restaurantListingTab === 'expired' ? 'archive-outline' : 'storefront-outline'} size={48} color="#9ca3af" />
+                    <Text style={styles.emptyTitle}>{restaurantListingTab === 'expired' ? 'No Expired Listings' : activeCategory === 'ALL' ? 'No Active Listings' : `No ${activeCategory} Listings`}</Text>
+                    <Text style={styles.emptySub}>{restaurantListingTab === 'expired' ? 'Listings move here when their safe-until time passes.' : activeCategory === 'ALL' ? 'Tap "+ Post" above to broadcast cooked meals, bakery, or raw grains.' : 'Try another category or post a listing in this category.'}</Text>
+                  </View>
+                }
+              />
+            </View>
           ) : currentSegment === 'restaurant_handover' ? (
             <FlatList
               data={incomingPickups}
@@ -851,6 +930,27 @@ export default function DiscoverScreen() {
       </View>
 
       {isRestaurant && currentSegment === 'restaurant_listings' && <TouchableOpacity accessibilityLabel="Create listing" style={styles.postFab} activeOpacity={0.85} onPress={() => setCreateModalVisible(true)}><MaterialCommunityIcons name="plus" size={28} color="#fff" /></TouchableOpacity>}
+
+      <Modal visible={deleteConfirmationVisible} transparent animationType="fade" onRequestClose={() => setDeleteConfirmationVisible(false)}>
+        <View style={styles.deleteConfirmOverlay}>
+          <View style={styles.deleteConfirmCard}>
+            <View style={styles.deleteConfirmIcon}><MaterialCommunityIcons name="trash-can-outline" size={24} color="#dc2626" /></View>
+            <Text style={styles.deleteConfirmTitle}>{deleteConfirmationMode === 'clear-expired' ? 'Clear expired listings?' : 'Remove this listing?'}</Text>
+            <Text style={styles.deleteConfirmMessage}>{deleteConfirmationMode === 'clear-expired'
+              ? `Remove all ${restaurantListings.filter((item) => new Date(item.safeUntil).getTime() <= listingClock).length} expired listings? Completed handovers will remain in history. Listings with pickups still waiting will be kept.`
+              : `${deleteConfirmationName} will be removed from your ${new Date(deleteConfirmationListing?.safeUntil || 0).getTime() <= listingClock ? 'expired' : 'active'} listings. Completed handovers will remain in history.`}</Text>
+            {deleteListingError ? <Text style={styles.deleteConfirmError}>{deleteListingError}</Text> : null}
+            <View style={styles.deleteConfirmActions}>
+              <TouchableOpacity style={styles.deleteCancelBtn} onPress={() => setDeleteConfirmationVisible(false)} disabled={deletingListing}>
+                <Text style={styles.deleteCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.deleteConfirmBtn} onPress={confirmDeleteListing} disabled={deletingListing}>
+                {deletingListing ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.deleteConfirmBtnText}>{deleteConfirmationMode === 'clear-expired' ? 'Clear all' : 'Remove'}</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* 3. NGO Claim Portions Modal */}
       <Modal visible={claimModalVisible} animationType="slide" transparent onRequestClose={() => setClaimModalVisible(false)}>
@@ -909,6 +1009,14 @@ export default function DiscoverScreen() {
                         onPress={() => setPortionsToClaim(Math.min(Number(selectedListing.availableServings) || 0, portionsToClaim + 1))}
                       >
                         <MaterialCommunityIcons name="plus" size={20} color="#111827" />
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.maxPortionsBtn}
+                        onPress={() => setPortionsToClaim(Number(selectedListing.availableServings) || 0)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Set quantity to maximum, ${selectedListing.availableServings}`}
+                      >
+                        <Text style={styles.maxPortionsText}>MAX</Text>
                       </TouchableOpacity>
                     </View>
 
@@ -1475,6 +1583,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e2e8f0',
   },
+  expiredListingCard: { backgroundColor: '#f1f5f9', borderColor: '#cbd5e1', opacity: 0.72 },
+  listingStatusTabs: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 2 },
+  listingStatusTab: { flex: 1, alignItems: 'center', paddingVertical: 9, borderRadius: 9, backgroundColor: '#f1f5f9' },
+  listingStatusTabActive: { backgroundColor: '#111827' },
+  listingStatusTabText: { color: '#64748b', fontSize: 12, fontWeight: '700' },
+  listingStatusTabTextActive: { color: '#ffffff' },
+  clearExpiredButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingHorizontal: 10, borderRadius: 9, backgroundColor: '#fef2f2' },
+  clearExpiredButtonText: { color: '#b91c1c', fontSize: 11, fontWeight: '800' },
+  restaurantListingTopRow: { flexDirection: 'row', alignItems: 'center', gap: 11 },
+  restaurantListingThumb: { width: 76, height: 76, borderRadius: 11, overflow: 'hidden', backgroundColor: '#f1f5f9', alignItems: 'center', justifyContent: 'center' },
+  restaurantListingThumbImage: { width: '100%', height: '100%', resizeMode: 'cover' },
+  restaurantListingTextCol: { flex: 1, minWidth: 0 },
   restoCat: {
     fontSize: 11,
     color: '#64748b',
@@ -1659,6 +1779,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.6)',
     justifyContent: 'flex-end',
   },
+  deleteConfirmOverlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.52)', justifyContent: 'center', padding: 24 },
+  deleteConfirmCard: { backgroundColor: '#ffffff', borderRadius: 20, padding: 22, alignItems: 'center' },
+  deleteConfirmIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#fef2f2', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  deleteConfirmTitle: { fontSize: 18, fontWeight: '800', color: '#0f172a', textAlign: 'center' },
+  deleteConfirmMessage: { fontSize: 13, color: '#64748b', lineHeight: 19, textAlign: 'center', marginTop: 8 },
+  deleteConfirmError: { color: '#b91c1c', textAlign: 'center', fontSize: 12, fontWeight: '600', marginTop: 10 },
+  deleteConfirmActions: { flexDirection: 'row', width: '100%', gap: 10, marginTop: 18 },
+  deleteCancelBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: '#f1f5f9', alignItems: 'center' },
+  deleteCancelText: { color: '#334155', fontWeight: '700' },
+  deleteConfirmBtn: { flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: '#dc2626', alignItems: 'center', justifyContent: 'center' },
+  deleteConfirmBtnText: { color: '#ffffff', fontWeight: '800' },
   modalCard: {
     backgroundColor: '#ffffff',
     borderTopLeftRadius: 24,
@@ -1703,6 +1834,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginBottom: 16,
   },
+  maxPortionsBtn: { paddingHorizontal: 11, height: 34, borderRadius: 9, backgroundColor: '#dcfce7', alignItems: 'center', justifyContent: 'center' },
+  maxPortionsText: { color: '#047857', fontSize: 11, fontWeight: '900' },
   counterBtn: {
     width: 36,
     height: 36,

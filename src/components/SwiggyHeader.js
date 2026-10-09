@@ -71,7 +71,7 @@ export default function SwiggyHeader({
               color="#10b981"
             />
             <Text style={styles.orgName} numberOfLines={1}>
-              {profile?.name || (isRestaurant ? 'Partner Restaurant' : 'Robin Hood Army')}
+              {profile?.name || (isRestaurant ? 'Restaurant' : 'NGO')}
             </Text>
           </View>
           <Text style={styles.addressText} numberOfLines={1}>
@@ -88,7 +88,7 @@ export default function SwiggyHeader({
           >
             <MaterialCommunityIcons name="account-circle" size={32} color="#10b981" />
             <View style={styles.karmaBadge}>
-              <Text style={styles.karmaText}>{profile?.karmaScore ?? 100}</Text>
+              <Text style={styles.karmaText}>{profile?.karmaScore ?? 0}</Text>
             </View>
           </TouchableOpacity>
         </View>
